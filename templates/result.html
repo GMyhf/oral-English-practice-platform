@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}练习结果 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+{% set type_name = {'vowel':'近似音区分','read-translate':'看读译','listen-spell':'听读写'}[session_row.practice_type] %}
+
+<div class="hero">
+  <h1>{{ type_name }} · 练习结果</h1>
+  <p class="mb-0 opacity-75">会话 #{{ session_row.id }} · {{ session_row.created_at }}</p>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-4"><div class="stat-box"><div class="value">{{ session_row.total }}</div><div class="label">总题数</div></div></div>
+  <div class="col-4"><div class="stat-box"><div class="value text-success">{{ session_row.correct_count }}</div><div class="label">正确</div></div></div>
+  <div class="col-4"><div class="stat-box"><div class="value text-danger">{{ session_row.wrong_count }}</div><div class="label">错误 / 无回答</div></div></div>
+</div>
+
+{% if session_row.total %}
+<div class="stat-box mb-4">
+  <div class="value">{{ (session_row.correct_count / session_row.total * 100) | round(1) }}%</div>
+  <div class="label">正确率</div>
+</div>
+{% endif %}
+
+<div class="mb-4 text-muted small">
+  练习参数：
+  {% for k, v in params.items() %}<span class="badge text-bg-light border me-1">{{ k }} = {{ v }}</span>{% endfor %}
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h6 class="mb-3">逐题回看</h6>
+    <div class="accordion" id="review">
+      {% for item in items %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button {{ '' if loop.first else 'collapsed' }}" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#q{{ item.seq }}">
+            <span class="badge me-2 {{ 'text-bg-success' if item.is_correct else 'text-bg-danger' }}">
+              {{ '✓' if item.is_correct else '✗' }}
+            </span>
+            第 {{ item.seq }} 题 ·
+            {%- if item.type == 'vowel' -%}
+              {{ item.options | map(attribute='word') | join(' / ') }}
+            {%- else -%}
+              {{ item.word }}
+            {%- endif -%}
+          </button>
+        </h2>
+        <div id="q{{ item.seq }}" class="accordion-collapse collapse {{ 'show' if loop.first }}">
+          <div class="accordion-body">
+
+            {% if item.type == 'vowel' %}
+            <div class="row g-3 mb-3">
+              {% for opt in item.options %}
+              <div class="col-6">
+                <div class="border rounded p-3 text-center {{ 'border-success bg-success-subtle' if opt.index == item.answer }}">
+                  <div class="text-muted small">编号 {{ opt.index }}</div>
+                  <div class="fs-4 fw-bold">{{ opt.word }}</div>
+                  {% if opt.index == item.answer %}<div class="small text-success mt-1">实际播放的是这个</div>{% endif %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <p class="mb-1">你的选择：<strong>{{ item.user_answer if item.user_answer else '无回答' }}</strong>
+              · 正确答案：<strong>{{ item.answer }}</strong></p>
+            <button class="btn btn-sm btn-outline-primary" data-audio="{{ item.audio_url }}">
+              <i class="bi bi-volume-up me-1"></i>再听一遍
+            </button>
+
+            {% else %}
+            <table class="table table-sm borderless">
+              <tr><th style="width:120px;">单词</th>
+                  <td class="fs-5 fw-bold text-primary">{{ item.word }}
+                    <span class="text-muted fs-6">{{ item.phonetic or '' }}</span></td></tr>
+              {% if item.type == 'read-translate' %}
+              <tr><th>正确译文</th><td>{{ item.meaning_cn }}</td></tr>
+              <tr><th>你的译文</th>
+                  <td class="{{ 'text-success' if item.is_correct else 'text-danger' }}">
+                    {{ item.user_answer or '无回答' }}</td></tr>
+              {% else %}
+              <tr><th>正确拼写</th><td class="fw-semibold">{{ item.word }}</td></tr>
+              <tr><th>你的拼写</th>
+                  <td class="{{ 'text-success' if item.is_correct else 'text-danger' }}">
+                    {{ item.user_answer or '无回答' }}</td></tr>
+              <tr><th>释义</th><td>{{ item.meaning_cn }}</td></tr>
+              {% endif %}
+              {% if item.example %}
+              <tr><th>例句</th><td class="text-muted">{{ item.example }}</td></tr>
+              {% endif %}
+            </table>
+
+            <div class="d-flex flex-wrap gap-2">
+              {% if item.recording_url %}
+              <button class="btn btn-sm btn-outline-primary" data-audio="{{ item.recording_url }}">
+                <i class="bi bi-mic me-1"></i>我的朗读
+              </button>
+              {% else %}
+              <span class="btn btn-sm btn-outline-secondary disabled">
+                <i class="bi bi-mic-mute me-1"></i>没有录到音
+              </span>
+              {% endif %}
+              <button class="btn btn-sm btn-outline-success"
+                      data-audio="{{ item.audio_url }}" data-say="{{ item.word }}">
+                <i class="bi bi-person-lines-fill me-1"></i>标准发音
+              </button>
+              {% if item.recording_url and item.audio_url %}
+              <button class="btn btn-sm btn-success"
+                      data-audio="{{ item.recording_url }}" data-then-audio="{{ item.audio_url }}">
+                <i class="bi bi-sort-down me-1"></i>连续对比
+              </button>
+              {% endif %}
+            </div>
+            {% endif %}
+
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if not items %}
+    <p class="text-muted mb-0">这次练习没有保存任何作答记录。</p>
+    {% endif %}
+  </div>
+</div>
+
+<a href="{{ url_for('practice') }}" class="btn btn-primary"><i class="bi bi-arrow-repeat me-2"></i>再练一轮</a>
+<a href="{{ url_for('account') }}" class="btn btn-outline-secondary">返回账号页</a>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 结果页的播放：有音频 URL 就放音频，没有则退回浏览器语音合成
+document.querySelectorAll('[data-audio]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const url = btn.dataset.audio;
+    if (url) {
+      Common.playUrl(url, () => {
+        if (btn.dataset.thenAudio) Common.playUrl(btn.dataset.thenAudio);
+      });
+    } else if (btn.dataset.say) {
+      Common.speak(btn.dataset.say);
+    } else {
+      Common.toast('这道题没有可播放的音频');
+    }
+  });
+});
+</script>
+{% endblock %}

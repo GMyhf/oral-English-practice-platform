@@ -1,6 +1,7 @@
 import os
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-fallback")
+# 写死的默认密钥等于公开密钥（任何人都能伪造登录 cookie），所以未配置时随机生成。
+SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(24).hex()
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "data/app.db")
 AUDIO_DIR = os.environ.get("AUDIO_DIR", "static/audio")
 RECORDING_DIR = os.environ.get("RECORDING_DIR", "data/recordings")

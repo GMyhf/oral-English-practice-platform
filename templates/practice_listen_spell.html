@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block body_attrs %}data-practice-type="listen-spell"{% endblock %}
+{% block title %}听读写 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>听读写</h1>
+  <p class="mb-0 opacity-75">第一轮听音跟读并录音，第二轮听音拼写</p>
+</div>
+
+<div class="card shadow-sm" id="setup">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-gear me-2"></i>练习设置</h6>
+    <div class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label" for="count">题目数量</label>
+        <input type="number" class="form-control" id="count" min="1" max="100" value="{{ defaults.count }}">
+      </div>
+      <div class="col-md-8">
+        <div class="alert alert-secondary py-2 mb-0 small">
+          <i class="bi bi-info-circle me-1"></i>
+          第一轮播放单词音频后空出 <strong>1 秒</strong>录音跟读；第二轮再播一次后空出
+          <strong>5 秒</strong>键入正确拼写。全程不显示单词拼写。
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-primary w-100 py-2 mt-3" id="btn-start">
+      <i class="bi bi-play-fill me-2"></i>开始练习
+    </button>
+  </div>
+</div>
+
+<div class="card shadow-sm d-none" id="stage">
+  <div class="card-body text-center p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <span class="badge rounded-pill text-bg-primary" id="progress">第 1 / 1 题</span>
+      <span class="badge rounded-pill text-bg-light border" id="score">对 0 · 错 0</span>
+    </div>
+    <h6 class="text-muted" id="stage-title">准备开始</h6>
+    <div class="stage-hint mb-3" id="hint"></div>
+
+    <div class="word-display mb-2" id="word-box">—</div>
+    <div class="word-phonetic mb-4" id="phonetic-box"></div>
+
+    <div data-pane="round1" id="pane-round1">
+      <div class="record-box mb-3">
+        <button class="btn-record d-none" id="rec-dot"><i class="bi bi-mic-fill"></i></button>
+        <div class="text-muted small mt-2">正在录制你的跟读</div>
+      </div>
+      <div class="timer-track"><div class="timer-fill" id="round1-bar"></div></div>
+    </div>
+
+    <div data-pane="round2" id="pane-round2">
+      <div class="input-group mb-3">
+        <span class="input-group-text"><i class="bi bi-keyboard"></i></span>
+        <input type="text" class="form-control" id="answer-input" autocomplete="off"
+               spellcheck="false" placeholder="输入你听到的单词拼写">
+        <button class="btn btn-primary" id="answer-submit">提交</button>
+      </div>
+      <div class="timer-track"><div class="timer-fill" id="round2-timer"></div></div>
+      <div class="text-muted small mt-2">播放后 5 秒内提交，超时记为无回答</div>
+    </div>
+  </div>
+</div>
+
+{% include "_audio_panel.html" %}
+
+<div class="text-center mt-3 d-none" id="finishing">
+  <div class="spinner-border text-primary" role="status"></div>
+  <div class="text-muted mt-2">正在保存练习结果与录音…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('scripts_js', filename='audio-store.js') }}"></script>
+<script src="{{ url_for('scripts_js', filename='tworounds.js') }}"></script>
+{% endblock %}

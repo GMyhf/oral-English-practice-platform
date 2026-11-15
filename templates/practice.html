@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}练习选择 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>练习选择</h1>
+  <p class="mb-0 opacity-75">三种练习方式，全部会记录成绩并可在结果页逐题回看</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_vowel') }}'">
+      <div class="card-body">
+        <div class="icon icon-vowel"><i class="bi bi-ear"></i></div>
+        <h5>近似音区分</h5>
+        <p class="card-text text-muted">
+          选一组近似音（如 /iː/ 与 /ɪ/）、题量和练习类型。每题屏幕给出两个单词，随机播放其中一个，
+          在限时内按 <kbd>1</kbd> 或 <kbd>2</kbd>。
+        </p>
+        <a class="btn btn-warning" href="{{ url_for('practice_vowel') }}">进入</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_read_translate') }}'">
+      <div class="card-body">
+        <div class="icon icon-read"><i class="bi bi-translate"></i></div>
+        <h5>看读译</h5>
+        <p class="card-text text-muted">
+          第一轮每个单词展示 1 秒同时录音；第二轮每个单词展示 5 秒，键入中文译文的任意一项。
+        </p>
+        <a class="btn btn-success" href="{{ url_for('practice_read_translate') }}">进入</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_listen_spell') }}'">
+      <div class="card-body">
+        <div class="icon icon-listen"><i class="bi bi-headphones"></i></div>
+        <h5>听读写</h5>
+        <p class="card-text text-muted">
+          第一轮播放单词音频后空出 1 秒录音跟读；第二轮再播一次后空出 5 秒，键入正确拼写。
+        </p>
+        <a class="btn btn-primary" href="{{ url_for('practice_listen_spell') }}">进入</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-secondary mt-4 mb-0">
+  <i class="bi bi-sliders me-2"></i>
+  题量、近似音限时与男女声的默认值可在 <a href="{{ url_for('settings') }}" class="alert-link">设置</a> 里改；
+  历史成绩见 <a href="{{ url_for('account') }}" class="alert-link">账号</a> 页。
+</div>
+{% endblock %}

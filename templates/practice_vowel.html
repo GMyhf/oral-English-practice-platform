@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}近似音区分 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>近似音区分</h1>
+  <p class="mb-0 opacity-75">听音频，判断刚才读的是屏幕上编号 1 还是 2 的单词</p>
+</div>
+
+<!-- 1. 设置 -->
+<div class="card shadow-sm" id="setup">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-gear me-2"></i>练习设置</h6>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="group_key">近似音组</label>
+        <select class="form-select" id="group_key">
+          {% for g in vowel_groups %}
+          <option value="{{ g.group_key }}"
+                  {{ 'selected' if request.args.get('group') == g.group_key }}>
+            {{ g.group_key }} — {{ g.label }}（{{ g.pair_count }} 组对立对）
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="count">题目数量</label>
+        <input type="number" class="form-control" id="count" min="1" max="100"
+               value="{{ defaults.count }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="time_limit">每题限时（秒）</label>
+        <input type="number" class="form-control" id="time_limit" min="0.2" max="30" step="0.1"
+               value="{{ defaults.time_limit }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">练习类型</label>
+        <div class="btn-group d-flex" role="group">
+          <input type="radio" class="btn-check" name="mode" id="mode_word" value="word" checked>
+          <label class="btn btn-outline-warning" for="mode_word">单词练习</label>
+          <input type="radio" class="btn-check" name="mode" id="mode_sentence" value="sentence"
+                 {{ 'disabled' if not modes.sentence }}>
+          <label class="btn btn-outline-warning text-muted" for="mode_sentence">句子练习</label>
+        </div>
+        {% if not modes.sentence %}
+        <div class="form-text">句子音频题库尚未上线，暂时只能选单词练习。</div>
+        {% endif %}
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">音频性别</label>
+        <div class="btn-group d-flex" role="group">
+          <input type="radio" class="btn-check" name="voice" id="voice_f" value="f"
+                 {{ 'checked' if defaults.voice != 'm' }}>
+          <label class="btn btn-outline-warning" for="voice_f">女声</label>
+          <input type="radio" class="btn-check" name="voice" id="voice_m" value="m"
+                 {{ 'checked' if defaults.voice == 'm' }}>
+          <label class="btn btn-outline-warning" for="voice_m">男声</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-secondary mt-3 mb-3 py-2 small">
+      <i class="bi bi-info-circle me-1"></i>
+      开始后请把手放在键盘 <kbd>1</kbd> <kbd>2</kbd> 上。每题限时到点未作答会记为「无回答」，
+      判完立刻进入下一题。
+    </div>
+    <button class="btn btn-warning w-100 py-2" id="btn-start">
+      <i class="bi bi-play-fill me-2"></i>开始练习
+    </button>
+  </div>
+</div>
+
+<!-- 2. 进行中 -->
+<div class="card shadow-sm d-none" id="stage">
+  <div class="card-body text-center p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <span class="badge rounded-pill text-bg-warning" id="progress">第 1 / 1 题</span>
+      <span class="badge rounded-pill text-bg-light border" id="score">对 0 · 错 0</span>
+    </div>
+
+    <div class="stage-hint mb-2" id="hint">正在播放音频…</div>
+
+    <div class="option-pair mb-4" id="options"></div>
+
+    <div class="timer-track mb-2"><div class="timer-fill" id="timer-fill"></div></div>
+    <div class="text-muted small mb-3" id="timer-text">剩余 1.0 秒</div>
+
+    <div id="feedback"></div>
+  </div>
+</div>
+
+<div class="text-center mt-3 d-none" id="finishing">
+  <div class="spinner-border text-warning" role="status"></div>
+  <div class="text-muted mt-2">正在保存练习结果…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('scripts_js', filename='vowel.js') }}"></script>
+{% endblock %}

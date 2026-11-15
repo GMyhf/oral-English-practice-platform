@@ -1,27 +1,39 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-<body>
- 
-    <div class="card">
-        <h1>Hello, 欢迎来到英语听说练习平台</h1>
-        <p>请登录</p>
-        <form action="/signin" method="post">
-            <label for="name">用户名:</label>
-            <input type="text" placeholder="用户名"id="name" name="name" required><br><br>
-            <label for="password">密码:</label>
-            <input type="password" placeholder="密码" id="password" name="password" required><br><br>
-            <label for="remember">
-                <input type="checkbox" id="remember" name="remember">
-                记住我
-            </label>
-            <button type="submit">登录</button>
-        </form>
-    </div>
- 
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}登录 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="card auth-card shadow-sm">
+  <div class="card-body p-4 p-md-5">
+    <h3 class="text-center mb-1">登录</h3>
+    <p class="text-center text-muted mb-4">登录后即可开始三种词汇发音练习</p>
+
+    {% if error %}
+    <div class="alert alert-danger py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}</div>
+    {% endif %}
+
+    <form method="post"
+          action="{{ url_for('login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">
+      <div class="mb-3">
+        <label class="form-label" for="username">用户名</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-person"></i></span>
+          <input type="text" class="form-control" id="username" name="username" required autofocus autocomplete="username">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="password">密码</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-lock"></i></span>
+          <input type="password" class="form-control" id="password" name="password" required autocomplete="current-password">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary w-100 py-2 mb-3">
+        <i class="bi bi-box-arrow-in-right me-2"></i>登 录
+      </button>
+      <div class="text-center text-muted small">
+        还没有账号？<a href="{{ url_for('register') }}" class="text-decoration-none">立即注册 →</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

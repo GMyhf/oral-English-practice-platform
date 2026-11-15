@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}帮助 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>使用说明</h1>
+  <p class="mb-0 opacity-75">第一次使用请先读完「录音权限」一节</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-ear me-2 text-warning"></i>近似音区分</h5>
+        <ol class="mb-3">
+          <li>选择一组近似音，例如 <code>sheep-ship</code>（/iː/ 与 /ɪ/）。</li>
+          <li>填空题量（默认取 <a href="{{ url_for('settings') }}">设置</a> 里的值），选择女声或男声。</li>
+          <li>每题屏幕上出现两个单词，分别标号 1 和 2，系统随机朗读其中一个。</li>
+          <li>在限时内按键盘 <kbd>1</kbd> 或 <kbd>2</kbd>；超时记为「无回答」，判完立刻进入下一题。</li>
+        </ol>
+        <p class="text-muted small mb-0">结束后会显示总题数、正确数、错误数，并可逐题回看当时听到的音频。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-translate me-2 text-success"></i>看读译</h5>
+        <ol class="mb-0">
+          <li>填空题量后开始，系统从词库随机抽词。</li>
+          <li><strong>第一轮</strong>：每个单词在屏幕上展示 1 秒，同时开始录音，请大声朗读。</li>
+          <li><strong>第二轮</strong>：每个单词展示 5 秒，不录音，用键盘输入它的中文译文（任写一项即可）。</li>
+          <li>结束后逐题显示译文对错与正确译文，并可回放你的朗读与标准发音对比。</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-headphones me-2 text-primary"></i>听读写</h5>
+        <ol class="mb-0">
+          <li>填空题量后开始，系统随机抽词并播放音频。</li>
+          <li><strong>第一轮</strong>：播放音频后空出 1 秒录音，请跟读刚才听到的单词。</li>
+          <li><strong>第二轮</strong>：再播一次音频后空出 5 秒，输入该单词的正确拼写。</li>
+          <li>结束后逐题显示拼写对错与正确译文，并可对比录音。</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-mic me-2 text-danger"></i>录音权限</h5>
+        <ul class="mb-0">
+          <li>首次点击录音时浏览器会弹出麦克风授权，请选择<strong>「允许」</strong>。</li>
+          <li>浏览器要求安全上下文：<code>http://localhost</code> 可用；用 IP 从别的机器访问时
+              <code>http://</code> 会被拒绝麦克风，需要 HTTPS 或改用 localhost。</li>
+          <li>编码自动选择：优先 <code>audio/webm;codecs=opus</code>，其次 <code>ogg</code>、<code>mp4</code>；
+              都不支持时（如部分 iOS Safari）回退为自行编码的 <strong>WAV</strong>。</li>
+          <li>不想授权也可以练习：录音失败只影响「回放对比」，答题与判分不受影响。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-info mt-4 mb-0">
+  <i class="bi bi-lightbulb me-2"></i>
+  <strong>发音从哪来？</strong>近似音模块使用 <code>static/audio/vowel/</code> 下的真人音频；
+  词库单词暂时没有配套音频时，使用浏览器语音合成（Web Speech API）朗读，
+  也可以在练习页的「音频导入」里上传自己的音频文件替换。
+</div>
+{% endblock %}

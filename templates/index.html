@@ -1,17 +1,95 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的 CSS 练习</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-<body>
- 
-    <div class="card">
-        <h1>Hello, CSS!</h1>
-        <p>这是我用 VS Code 写的第一个样式卡片。</p>
-        <a, href="/signin"><button>点击我</button></a>
+{% extends "base.html" %}
+{% block title %}首页 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>🎯 英语词汇发音练习平台</h1>
+  <p class="mb-0 opacity-75">练近似音辨听 · 练看词写译 · 练听音拼写，并可回放自己的朗读与标准发音对比</p>
+</div>
+
+<div class="row g-4 mb-5">
+  <div class="col-md-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_vowel') }}'">
+      <div class="card-body">
+        <div class="icon icon-vowel"><i class="bi bi-ear"></i></div>
+        <h5 class="card-title">近似音区分</h5>
+        <p class="card-text text-muted">屏幕上给出两个相似单词，随机播放其中一个，在限时内按键盘 1 / 2 判断听到的是哪个。</p>
+        <a href="{{ url_for('practice_vowel') }}" class="btn btn-warning">开始辨音</a>
+      </div>
     </div>
- 
-</body>
-</html>
+  </div>
+  <div class="col-md-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_read_translate') }}'">
+      <div class="card-body">
+        <div class="icon icon-read"><i class="bi bi-translate"></i></div>
+        <h5 class="card-title">看读译</h5>
+        <p class="card-text text-muted">第一轮每个单词展示 1 秒并录音，第二轮每个单词展示 5 秒，键入中文译文。</p>
+        <a href="{{ url_for('practice_read_translate') }}" class="btn btn-success">开始训练</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_listen_spell') }}'">
+      <div class="card-body">
+        <div class="icon icon-listen"><i class="bi bi-headphones"></i></div>
+        <h5 class="card-title">听读写</h5>
+        <p class="card-text text-muted">第一轮播放音频后录音跟读，第二轮再播一次音频，在 5 秒内键入正确拼写。</p>
+        <a href="{{ url_for('practice_listen_spell') }}" class="btn btn-primary">开始训练</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-box"><div class="value">{{ word_count }}</div><div class="label">词库单词数</div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-box"><div class="value">{{ vowel_groups | length }}</div><div class="label">近似音组</div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-box">
+      <div class="value">{{ vowel_groups | sum(attribute='pair_count') }}</div><div class="label">最小对立对</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-box"><div class="value">{{ '已登录' if current_user else '未登录' }}</div><div class="label">当前状态</div></div>
+  </div>
+</div>
+
+{% if not current_user %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle-fill me-2"></i><strong>使用提示：</strong>三个练习模块都需要
+  <a href="{{ url_for('register') }}" class="alert-link">注册</a> 并
+  <a href="{{ url_for('login') }}" class="alert-link">登录</a> 后才能进入。
+  练习会用到麦克风和语音合成，首次使用时浏览器会请求权限，请选择「允许」。
+</div>
+{% else %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle-fill me-2"></i>已登录为 <strong>{{ current_user.nickname or current_user.username }}</strong>，
+  默认题量 {{ current_user.default_count }} 题，近似音每题限时 {{ current_user.time_limit }} 秒，
+  可在 <a href="{{ url_for('settings') }}" class="alert-link">设置</a> 中调整。
+</div>
+{% endif %}
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h6 class="mb-3">近似音组一览</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light"><tr><th>组</th><th>音标对照</th><th>说明</th><th class="text-end">对立对</th></tr></thead>
+        <tbody>
+        {% for g in vowel_groups %}
+          <tr>
+            <td><a href="{{ url_for('practice_vowel', group=g.group_key) }}">{{ g.group_key }}</a></td>
+            <td class="fw-semibold text-primary">{{ g.label }}</td>
+            <td class="text-muted small">{{ g.description }}</td>
+            <td class="text-end">{{ g.pair_count }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

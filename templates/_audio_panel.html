@@ -1,0 +1,25 @@
+{# 音频导入面板：听读写 / 看读译共用，元素 id 由 scripts/audio-store.js 绑定 #}
+<div class="card shadow-sm mt-4">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="fw-semibold"><i class="bi bi-music-note-list me-1"></i>音频导入</span>
+      <label class="btn btn-sm btn-outline-primary mb-0">
+        <i class="bi bi-upload me-1"></i>批量导入音频
+        <input type="file" id="audio-input" accept="audio/*" multiple hidden>
+      </label>
+      <label class="btn btn-sm btn-outline-secondary mb-0">
+        <i class="bi bi-pin-angle me-1"></i>导入为当前单词
+        <input type="file" id="audio-input-one" accept="audio/*" hidden>
+      </label>
+      <button class="btn btn-sm btn-outline-danger ms-auto" id="audio-clear">
+        <i class="bi bi-trash3 me-1"></i>清除全部
+      </button>
+    </div>
+    <div class="mt-2"><span class="badge rounded-pill text-bg-light text-dark border" id="audio-badge"></span></div>
+    <div class="text-muted small mt-2" id="audio-status">正在读取音频库…</div>
+    <div class="text-muted small">
+      文件名与单词同名即自动匹配，例如 <code>abandon.mp3</code> → <b>abandon</b>。
+      发音来源优先级：服务器音频 → 本地导入音频 → 浏览器合成发音。
+    </div>
+  </div>
+</div>

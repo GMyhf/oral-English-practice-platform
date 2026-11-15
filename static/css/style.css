@@ -1,41 +1,230 @@
-/* 给整个页面加个背景色 */
-body {
-    background-color: #f0f2f5;
-    font-family: 'Segoe UI', sans-serif;
-    display: flex;
-    justify-content: center; /* 水平居中 */
-    align-items: center;     /* 垂直居中 */
-    height: 100vh;           /* 占满屏幕高度 */
-    margin: 0;
+/* 英语词汇发音练习平台 · 全局样式
+   依赖 Bootstrap 5，这里只补充平台特有的部分。
+   注意：不要给 body 写 display:flex / height:100vh，会把 Bootstrap 的容器布局挤歪。 */
+
+:root {
+    --brand: #4f6df5;
+    --brand-soft: #7a8cff;
 }
 
-/* 设计卡片样式 */
-.card {
-    background-color: white;
-    width: 300px;
-    padding: 30px;
-    border-radius: 15px;      /* 圆角 */
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); /* 阴影 */
+body {
+    background: #f5f6fa;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.hero {
+    background: linear-gradient(135deg, var(--brand), var(--brand-soft));
+    color: #fff;
+    border-radius: 16px;
+    padding: 2.2rem 2rem;
+    margin-bottom: 1.8rem;
+}
+
+.hero h1 {
+    font-weight: 700;
+    margin-bottom: .4rem;
+}
+
+/* 模块入口卡片 */
+.module-card {
+    cursor: pointer;
+    border: none;
+    border-radius: 16px;
+    transition: transform .15s, box-shadow .15s;
+}
+
+.module-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 28px rgba(79, 109, 245, .22);
+}
+
+.module-card .icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    color: #fff;
+    margin-bottom: .9rem;
+}
+
+.icon-vowel { background: linear-gradient(135deg, #ffb86b, #f5820a); }
+.icon-listen { background: linear-gradient(135deg, #6ea8fe, #4f6df5); }
+.icon-read { background: linear-gradient(135deg, #7bd3a3, #4bb87a); }
+
+/* 账号页卡片 */
+.auth-card {
+    max-width: 440px;
+    margin: 3rem auto;
+    border: none;
+    border-radius: 16px;
+}
+
+/* 大屏展示单词 / 选项 */
+.word-display {
+    font-size: 3.5rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 2.5rem 1rem;
+    background: #fff;
+    border-radius: 16px;
+    letter-spacing: 2px;
+    color: var(--brand);
+}
+
+.word-phonetic {
+    text-align: center;
+    color: #666;
+    font-size: 1.2rem;
+}
+
+.option-pair {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.option-chip {
+    min-width: 220px;
+    padding: 1.4rem 1rem;
+    border-radius: 14px;
+    background: #fff;
+    border: 2px solid #e3e6f0;
+    text-align: center;
+    transition: border-color .12s, background .12s;
+}
+
+.option-chip .num {
+    display: inline-flex;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--brand);
+    color: #fff;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    margin-bottom: .5rem;
+}
+
+.option-chip .txt {
+    font-size: 1.9rem;
+    font-weight: 700;
+}
+
+.option-chip.picked {
+    border-color: var(--brand);
+    background: #eef1ff;
+}
+
+.option-chip.is-answer {
+    border-color: #28a745;
+    background: #e8f9ed;
+}
+
+/* 录音 */
+.record-box {
+    text-align: center;
+    padding: 1.2rem;
+    background: #fff;
+    border-radius: 12px;
+}
+
+.btn-record {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    font-size: 1.8rem;
+    border: none;
+    color: #fff;
+    background: var(--brand);
+    box-shadow: 0 6px 18px rgba(79, 109, 245, .35);
+    transition: transform .15s;
+}
+
+.btn-record.recording {
+    background: #f56565;
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 6px 18px rgba(245, 101, 101, .4); }
+    50% { transform: scale(1.08); box-shadow: 0 6px 24px rgba(245, 101, 101, .7); }
+}
+
+/* 倒计时条 */
+.timer-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #e3e6f0;
+    overflow: hidden;
+}
+
+.timer-fill {
+    height: 100%;
+    width: 100%;
+    background: var(--brand);
+    transition: width .1s linear;
+}
+
+.timer-fill.urgent { background: #f56565; }
+
+/* 结果反馈条 */
+.result-correct {
+    background: #d1f5dd;
+    color: #155724;
+    border-left: 4px solid #28a745;
+    padding: .8rem 1.1rem;
+    border-radius: 8px;
+}
+
+.result-wrong {
+    background: #ffe0e0;
+    color: #721c24;
+    border-left: 4px solid #dc3545;
+    padding: .8rem 1.1rem;
+    border-radius: 8px;
+}
+
+/* 统计块 */
+.stat-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.1rem;
     text-align: center;
 }
 
-/* 标题颜色 */
-h1 {
-    color: #333;
+.stat-box .value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--brand);
 }
 
-/* 按钮样式 */
-button {
-    background-color: #007bff;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background 0.3s; /* 动画过渡 */
+.stat-box .label {
+    color: #6c757d;
+    font-size: .88rem;
 }
 
-/* 鼠标悬停在按钮上的效果 */
-button:hover {
-    background-color: #0056b3;
+footer {
+    text-align: center;
+    padding: 2rem 0;
+    color: #adb5bd;
+    font-size: .85rem;
 }
+
+/* 练习进行中的大字提示 */
+.stage-hint {
+    font-size: 1.05rem;
+    color: #6c757d;
+    min-height: 1.6rem;
+}
+
+audio { width: 100%; height: 36px; }
