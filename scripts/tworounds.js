@@ -8,6 +8,9 @@
      第一轮：播放单词音频后录音跟读（不显示拼写）
      第二轮：再播一次音频，限时内键入正确拼写
 
+   单词音频由后端每题随机挑一轨真人朗读（男声 / 女声），前端只看到 word.audio_url
+   和 word.voice，把 voice 一起存进作答记录，结果页才播得准「当时听到的那一轨」。
+
    三段时长——第一轮、第二轮、题目之间的停顿——都从练习设置里的输入框读，
    默认值和 min/max 由 config.py 经 app.py 渲染进输入框，这里只负责按边界夹一遍；
    点「开始练习」时读一次并写进会话 params，中途改框不影响正在跑的这轮。
@@ -241,7 +244,10 @@
           phonetic: word.phonetic,
           meaning_cn: word.meaning_cn,
           example: word.example,
-          audio_url: word.audio_url || null
+          audio_url: word.audio_url || null,
+          // 这条朗读用的是男声还是女声（词库音频每题随机），结果页据此标注；
+          // 只有教材 3A 单音频或浏览器本地导入的音频没有性别，后端给 null
+          voice: word.voice || null
         },
         user_answer: answer || cfg.emptyAnswer,
         is_correct: correct,
@@ -355,7 +361,8 @@
     }
   }
 
-  // 音频导入面板：词库单词默认没有真人音频，可以在这里导入自己的录音。
+  // 音频导入面板：词库里的词现在都有服务器上的真人朗读了，按「服务器 → 本地 → 合成」
+  // 的优先级，这里导入的音频只在某个词还没配音频时才会被播到。
   // 听读写不能把单词拼写画进面板（面板挂在题目下方，写了就等于泄答案），看读译不受影响。
   if (window.WordAudio && $("audio-input")) {
     bindWordAudio(() => currentWord, { revealWord: practiceType !== "listen-spell" });

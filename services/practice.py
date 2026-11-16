@@ -11,6 +11,7 @@ PRACTICE_TYPES = ("vowel", "read-translate", "listen-spell")
 VOWEL_MODES = {"word": True, "sentence": True}
 
 # 音频性别：random = 每题自己抽，f/m = 锁定（留给测试脚本和分性别统计）
+# 近似音和词库单词共用这一组取值；词库单词不给锁定入口，永远随机
 VOWEL_VOICES = ("f", "m")
 DEFAULT_VOWEL_VOICE = "random"
 
@@ -127,6 +128,24 @@ def build_sentence_questions(group_key, count, voice=DEFAULT_VOWEL_VOICE):
     return _assemble_questions(by_item, group_key, count, voice, with_sentence=True)
 
 
+def _attach_word_audio(word):
+    """给抽到的单词挑一个性别的朗读，就地写进 audio / voice 并删掉三列原始路径。
+
+    Quiz3000 的男女声和近似音一样每题随机抽：词库按拼写出题，练的是这个词读起来
+    什么样，不该固定在某个发音人上。只有教材 3A 单音频的词（没有 audio_f / audio_m）
+    退回 audio_path，这时 voice 给 None，前端结果页不标性别。
+    """
+    available = [g for g in VOWEL_VOICES if word.get("audio_" + g)]
+    if available:
+        voice = random.choice(available)
+        word["audio"], word["voice"] = word["audio_" + voice], voice
+    else:
+        word["audio"], word["voice"] = word.get("audio_path"), None
+    for key in ("audio_path", "audio_f", "audio_m"):
+        word.pop(key, None)
+    return word
+
+
 def random_words(count):
     """看读译 / 听读写：从词库随机抽 count 个单词。
 
@@ -136,11 +155,11 @@ def random_words(count):
     db = get_db()
     bank_size = db.execute("SELECT COUNT(*) AS c FROM words").fetchone()["c"]
     rows = db.execute(
-        "SELECT id, word, phonetic, meaning_cn, example, audio_path "
+        "SELECT id, word, phonetic, meaning_cn, example, audio_path, audio_f, audio_m "
         "FROM words ORDER BY RANDOM() LIMIT ?",
         (count,),
     ).fetchall()
-    return [dict(r) for r in rows], bank_size
+    return [_attach_word_audio(dict(r)) for r in rows], bank_size
 
 
 def words_by_ids(ids):
@@ -149,8 +168,8 @@ def words_by_ids(ids):
         return {}
     marks = ",".join("?" * len(ids))
     rows = get_db().execute(
-        f"SELECT id, word, phonetic, meaning_cn, example, audio_path "
+        f"SELECT id, word, phonetic, meaning_cn, example, audio_path, audio_f, audio_m "
         f"FROM words WHERE id IN ({marks})",
         ids,
     ).fetchall()
-    return {r["id"]: dict(r) for r in rows}
+    return {r["id"]: _attach_word_audio(dict(r)) for r in rows}

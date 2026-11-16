@@ -367,7 +367,9 @@ def account():
 
 @app.route("/help")
 def help_page():
-    return render_template("help.html")
+    # 帮助页要告诉学生词库有多大，数字从库里现取，加词之后不用改文案
+    word_count = get_db().execute("SELECT COUNT(*) AS c FROM words").fetchone()["c"]
+    return render_template("help.html", word_count=word_count)
 
 
 @app.route("/result/<int:session_id>")
@@ -457,7 +459,8 @@ def api_words():
         return jsonify({"error": str(exc)}), 400
     words, bank_size = practice.random_words(requested)
     for w in words:
-        w["audio_url"] = audio_url(w.pop("audio_path"))
+        # practice.random_words 已经按题随机挑好性别，这里只把相对路径换成 URL
+        w["audio_url"] = audio_url(w.pop("audio"))
     # actual < requested 说明词库不够，前端要提示用户实际只练了 actual 题
     return jsonify({
         "words": words,

@@ -20,8 +20,13 @@ DB_PATH = os.path.join(BASE_DIR, "data", "app.db")
 VOWEL_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "vowel")
 SENTENCE_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "sentence")
 WORD_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "word")
+# Quiz3000 课堂背诵词的男女声朗读，一个词两个文件，和近似音模块一样按性别分列存
+WORD3000_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "word3000")
 # 整句文本：由 scripts/import_audio_package.py 转写 4A 后写出，这里只负责登记进库
 SENTENCE_TEXTS = os.path.join(BASE_DIR, "scripts", "sentence_texts.json")
+# Quiz3000 词表（单词 + 音标 + 中文释义）：由 scripts/build_quiz3000_words.py 从
+# ECDICT 词典生成后进版本库，音频目录本身不带任何文本信息
+QUIZ3000_WORDS = os.path.join(BASE_DIR, "scripts", "quiz3000_words.json")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -42,6 +47,8 @@ CREATE TABLE IF NOT EXISTS words (
     meaning_cn TEXT,
     example    TEXT,
     audio_path TEXT,               -- 有真人音频时填相对路径，否则前端用合成发音
+    audio_f    TEXT,               -- 女声朗读（Quiz3000），出题时和 audio_m 二选一随机
+    audio_m    TEXT,               -- 男声朗读（Quiz3000）
     category   TEXT
 );
 
@@ -158,6 +165,10 @@ AUDIO_NAME_RE = re.compile(r"^(\d+)\.(\d+)-(.+?)\.([fm])\.(wav|mp3)$", re.IGNORE
 
 # 单词音频文件名：<word>.wav / <word>.mp3，专有名词保留首字母大写（Paul、Tuesday）
 WORD_AUDIO_NAME_RE = re.compile(r"^([A-Za-z][A-Za-z'\-]*?)\.(wav|mp3)$", re.IGNORECASE)
+
+# Quiz3000 的单词音频：<word>.f.mp3 / <word>.m.mp3。文件名里的词一律小写（Windows
+# 文件系统不区分大小写，China / china 这种同名异义词会撞车），展示用的大小写看词表。
+WORD3000_NAME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9'\- ]*?)\.([fm])\.(wav|mp3)$", re.IGNORECASE)
 
 SEED_WORDS = [
     ("abandon", "/əˈbændən/", "放弃；抛弃", "He abandoned his car in the snow."),
@@ -649,6 +660,98 @@ def scan_word_audio(conn):
     return matched, orphans
 
 
+def load_quiz3000_words():
+    """读 scripts/quiz3000_words.json → {小写词形: [词表条目]}。
+
+    同一个文件名可能对应两个词条（China / china 在 Windows 上只能存一个 mp3），
+    所以按小写词形收集成列表，登记时逐个处理。
+    """
+    if not os.path.isfile(QUIZ3000_WORDS):
+        return {}
+    with open(QUIZ3000_WORDS, encoding="utf-8") as fh:
+        entries = json.load(fh)["words"]
+    by_key = {}
+    for entry in entries:
+        by_key.setdefault(entry["word"].lower(), []).append(entry)
+    return by_key
+
+
+def scan_quiz3000_audio(conn):
+    """扫描 static/audio/word3000，把 Quiz3000 的男女声朗读登记进 words.audio_f / audio_m。
+
+    只认词表里有的词形：词表是 scripts/build_quiz3000_words.py 用 ECDICT 词典筛过的，
+    文件名对不上词表的一律算非单词（提示音、拼写错误之类），列为孤儿打印出来。
+    词库里已有的 3A 种子词只补两个性别的音频，释义和例句保持手写的那份；
+    上次从词表插入的词连音释义一起刷新；新词按词表插入，没有例句。
+    词形按原大小写精确匹配，因为 China 和 china 是两道题。
+    """
+    if not os.path.isdir(WORD3000_AUDIO_DIR):
+        return 0, 0, 0, []
+    by_key = load_quiz3000_words()
+    if not by_key:
+        print("  词表 scripts/quiz3000_words.json 不在，跳过 Quiz3000 音频（先跑 "
+              "scripts/build_quiz3000_words.py）")
+        return 0, 0, 0, []
+
+    on_disk = {}
+    skipped = []
+    for fname in sorted(os.listdir(WORD3000_AUDIO_DIR)):
+        if not os.path.isfile(os.path.join(WORD3000_AUDIO_DIR, fname)):
+            continue
+        match = WORD3000_NAME_RE.match(fname)
+        if not match:
+            skipped.append(fname)
+            continue
+        key, voice = match.group(1).lower(), match.group(2).lower()
+        on_disk.setdefault(key, {})[voice] = f"static/audio/word3000/{fname}"
+
+    inserted = updated = seeded = 0
+    orphans = []
+    for key in sorted(on_disk):
+        entries = by_key.get(key)
+        if not entries:
+            orphans.append(key)
+            continue
+        voices = on_disk[key]
+        for entry in entries:
+            word = entry["word"]
+            row = conn.execute("SELECT id, category FROM words WHERE word = ?", (word,)).fetchone()
+            params = (voices.get("f"), voices.get("m"))
+            if row is None:
+                conn.execute(
+                    "INSERT INTO words(word, phonetic, meaning_cn, audio_f, audio_m, category) "
+                    "VALUES(?,?,?,?,?,'quiz3000')",
+                    (word, entry.get("phonetic"), entry.get("meaning_cn"),) + params,
+                )
+                inserted += 1
+            elif row["category"] == "quiz3000":
+                # 这批词的释义和音标只认词表：重新生成词表（纠正词典错译、统一音标字符）
+                # 之后必须能跟着刷新，否则库里留的还是上一版词典原文
+                conn.execute(
+                    "UPDATE words SET audio_f = ?, audio_m = ?, phonetic = ?, meaning_cn = ? "
+                    "WHERE id = ?",
+                    params + (entry.get("phonetic"), entry.get("meaning_cn"), row["id"]),
+                )
+                updated += 1
+            else:
+                conn.execute("UPDATE words SET audio_f = ?, audio_m = ? WHERE id = ?",
+                             params + (row["id"],))
+                seeded += 1
+
+    for fname in skipped:
+        print("  跳过无法解析的文件名：", fname)
+    return inserted, updated, seeded, orphans
+
+
+def migrate_words_voice_columns(conn):
+    """老库的 words 表没有 audio_f / audio_m，CREATE TABLE IF NOT EXISTS 不会补列，只能 ALTER。"""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(words)")}
+    for name in ("audio_f", "audio_m"):
+        if name not in columns:
+            conn.execute("ALTER TABLE words ADD COLUMN %s TEXT" % name)
+            print("已为 words 表补上 %s 列" % name)
+
+
 def init_db(reset=False):
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -660,11 +763,14 @@ def init_db(reset=False):
         conn.executescript(DROP)
 
     conn.executescript(SCHEMA)
+    # 老库里的 words 表没有性别分列的音频字段，补列要在扫描 Quiz3000 音频之前
+    migrate_words_voice_columns(conn)
 
     words = seed_words(conn)
     scan_vowel_audio(conn)
     sentence_items, sentence_missing = scan_sentence_audio(conn)
     audio_words, orphans = scan_word_audio(conn)
+    q3_inserted, q3_updated, q3_seeded, q3_orphans = scan_quiz3000_audio(conn)
     conn.commit()
 
     if orphans:
@@ -673,18 +779,36 @@ def init_db(reset=False):
                 n=len(orphans), items=" ".join(orphans)
             )
         )
+    if q3_orphans:
+        print(
+            "  Quiz3000 里 {n} 个音频的词形不在词表（词典查不到，按非单词处理）：{items}".format(
+                n=len(q3_orphans), items=" ".join(q3_orphans[:40])
+            )
+        )
 
     total_groups = conn.execute("SELECT COUNT(*) AS c FROM vowel_groups").fetchone()["c"]
     total_items = conn.execute("SELECT COUNT(*) AS c FROM vowel_items").fetchone()["c"]
     total_sentences = conn.execute("SELECT COUNT(*) AS c FROM sentence_items").fetchone()["c"]
     sentence_groups = conn.execute(
         "SELECT COUNT(DISTINCT group_id) AS c FROM sentence_items").fetchone()["c"]
+    bank_size = conn.execute("SELECT COUNT(*) AS c FROM words").fetchone()["c"]
+    both_voices = conn.execute(
+        "SELECT COUNT(*) AS c FROM words WHERE audio_f IS NOT NULL AND audio_m IS NOT NULL"
+    ).fetchone()["c"]
     print(
-        "数据库初始化完成 → {path}\n  单词 {w} 条（真人音频 {wa} 条），近似音组 {g} 组，"
-        "最小对立音频 {i} 条\n  句子近似音 {s} 条（覆盖 {sg} 组，缺文本跳过 {sm} 条）".format(
+        "数据库初始化完成 → {path}\n  种子单词 {seed} 条，词库共 {bank} 条"
+        "（教材 3A 音频 {wa} 条，Quiz3000 新增 {qn} 条、给种子词补男女声 {qs} 条、"
+        "刷新已有 Quiz3000 词条 {qu} 条，男女声齐全 {qv} 条）\n"
+        "  近似音组 {g} 组，最小对立音频 {i} 条\n"
+        "  句子近似音 {s} 条（覆盖 {sg} 组，缺文本跳过 {sm} 条）".format(
             path=os.path.relpath(DB_PATH, BASE_DIR),
-            w=words,
+            seed=words,
+            bank=bank_size,
             wa=audio_words,
+            qn=q3_inserted,
+            qs=q3_seeded,
+            qu=q3_updated,
+            qv=both_voices,
             g=total_groups,
             i=total_items,
             s=total_sentences,

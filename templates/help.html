@@ -29,7 +29,7 @@
       <div class="card-body">
         <h5 class="mb-3"><i class="bi bi-translate me-2 text-success"></i>看读译</h5>
         <ol class="mb-0">
-          <li>填空题量和三段时长后开始，系统从词库随机抽词。</li>
+          <li>填空题量和三段时长后开始，系统从词库（共 {{ word_count }} 个单词）随机抽词。</li>
           <li><strong>第一轮</strong>：每个单词在屏幕上展示你填的第一轮时长（默认 1 秒），同时开始录音，请大声朗读。</li>
           <li><strong>第二轮</strong>：每个单词展示你填的第二轮时长（默认 5 秒），不录音，用键盘输入它的中文译文（任写一项即可）。</li>
           <li>时长填出格的值会被夹回上下限：第一轮 0.3~20 秒、第二轮 1~60 秒、题目之间的停顿 0~3 秒。</li>
@@ -44,7 +44,8 @@
       <div class="card-body">
         <h5 class="mb-3"><i class="bi bi-headphones me-2 text-primary"></i>听读写</h5>
         <ol class="mb-0">
-          <li>填空题量和三段时长后开始，系统随机抽词并播放音频。</li>
+          <li>填空题量和三段时长后开始，系统从词库（共 {{ word_count }} 个单词）随机抽词并播放真人朗读；
+              男声、女声每题随机抽一个，不能自己挑——练的是听出单词，不是听惯某个人的音色。</li>
           <li><strong>第一轮</strong>：播放音频后空出你填的第一轮时长录音（默认 1 秒），请跟读刚才听到的单词。</li>
           <li><strong>第二轮</strong>：再播一次音频后空出你填的第二轮时长（默认 5 秒），输入该单词的正确拼写。</li>
           <li>全程不显示拼写；三段时长的上下限与看读译一致，填出格会被夹回。</li>
@@ -73,8 +74,10 @@
 
 <div class="alert alert-info mt-4 mb-0">
   <i class="bi bi-lightbulb me-2"></i>
-  <strong>发音从哪来？</strong>近似音模块使用 <code>static/audio/vowel/</code> 下的真人音频；
-  词库单词暂时没有配套音频时，使用浏览器语音合成（Web Speech API）朗读，
-  也可以在练习页的「音频导入」里上传自己的音频文件替换。
+  <strong>发音从哪来？</strong>近似音模块和词库里的每个单词都配了真人朗读音频，
+  按男声 / 女声各存一份，出题时随机播其中一个；结果页「标准发音」按钮播的就是
+  当时听到的那一轨。极少数新加的词还没有配套音频时，先在练习页底部的「音频导入」
+  里上传同名文件（如 <code>abandon.mp3</code>）顶上，再不行用浏览器语音合成
+  （Web Speech API）朗读。
 </div>
 {% endblock %}

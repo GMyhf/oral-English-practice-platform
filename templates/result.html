@@ -117,6 +117,11 @@
                       data-audio="{{ item.audio_url }}" data-say="{{ item.word }}">
                 <i class="bi bi-person-lines-fill me-1"></i>标准发音
               </button>
+              {% if item.voice %}
+              <span class="small text-muted align-self-center">
+                {{ '女声' if item.voice == 'f' else '男声' }}（每题随机）
+              </span>
+              {% endif %}
               {% if item.recording_url and item.audio_url %}
               <button class="btn btn-sm btn-success"
                       data-audio="{{ item.recording_url }}" data-then-audio="{{ item.audio_url }}">
