@@ -5,7 +5,7 @@
 {% block content %}
 <div class="hero">
   <h1>听读写</h1>
-  <p class="mb-0 opacity-75">第一轮听音跟读并录音，第二轮听音拼写</p>
+  <p class="mb-0 opacity-75">第一轮跟着标准音边听边念，第二轮听音拼写</p>
 </div>
 
 <div class="card shadow-sm" id="setup">
@@ -14,31 +14,45 @@
     <div class="row g-3 align-items-end">
       <div class="col-md-3">
         <label class="form-label" for="count">题目数量</label>
-        <input type="number" class="form-control" id="count" min="1" max="100" value="{{ defaults.count }}">
+        <input type="number" class="form-control" id="count" min="1" max="100" inputmode="numeric"
+               value="{{ defaults.count }}">
       </div>
       <div class="col-md-3">
-        <label class="form-label" for="round1_seconds">第一轮 · 听完跟读（秒）</label>
+        <label class="form-label" for="round1_seconds">第一轮 · 跟读时长（秒）</label>
         <input type="number" class="form-control" id="round1_seconds"
                min="{{ rhythm.round1.min }}" max="{{ rhythm.round1.max }}" step="0.1"
-               value="{{ rhythm.round1.value }}">
+               inputmode="decimal" value="{{ rhythm.round1.value }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="round2_seconds">第二轮 · 听音拼写限时（秒）</label>
         <input type="number" class="form-control" id="round2_seconds"
                min="{{ rhythm.round2.min }}" max="{{ rhythm.round2.max }}" step="0.5"
-               value="{{ rhythm.round2.value }}">
+               inputmode="decimal" value="{{ rhythm.round2.value }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="round_gap">题目之间的停顿（秒）</label>
         <input type="number" class="form-control" id="round_gap"
                min="{{ rhythm.gap.min }}" max="{{ rhythm.gap.max }}" step="0.05"
-               value="{{ rhythm.gap.value }}">
+               inputmode="decimal" value="{{ rhythm.gap.value }}">
       </div>
     </div>
+
+    <div class="form-check form-switch mt-3 mb-0">
+      <input class="form-check-input" type="checkbox" role="switch" id="overlap_record" checked>
+      <label class="form-check-label" for="overlap_record">
+        第一轮边播边录
+        <span class="text-muted small">（标准音与录音同时开始，跟着念）</span>
+      </label>
+    </div>
+
     <div class="alert alert-secondary py-2 mt-3 mb-0 small">
       <i class="bi bi-info-circle me-1"></i>
-      第一轮播放单词音频后空出上面填的秒数录音跟读，第二轮再播一次后限时键入拼写。
-      全程不显示单词拼写，三段时长都能改，出格的值会被夹回上下限。
+      开着「边播边录」时，单词音频一响就开始录，你跟着标准音念；音频放完之后再留满上面填的秒数，
+      让你把这个词独立念一遍——每个词的录音长度就是「音频本身 + 第一轮时长」。
+      想让嘴巴多留几秒就把第一轮调大些；关掉这个开关就回到「先听完、再跟读」，同样是一轮时长。
+      第二轮再播一次音频，限时键入拼写，全程不显示拼写。
+      <span class="d-block mt-1"><i class="bi bi-headphones me-1"></i>
+      建议戴耳机：外放时标准音会被一起录进「我的朗读」。</span>
     </div>
     <button class="btn btn-primary w-100 py-2 mt-3" id="btn-start">
       <i class="bi bi-play-fill me-2"></i>开始练习
@@ -47,7 +61,7 @@
 </div>
 
 <div class="card shadow-sm d-none" id="stage">
-  <div class="card-body text-center p-4">
+  <div class="card-body text-center p-3 p-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <span class="badge rounded-pill text-bg-primary" id="progress">第 1 / 1 题</span>
       <span class="badge rounded-pill text-bg-light border" id="score">对 0 · 错 0</span>
@@ -68,9 +82,10 @@
 
     <div data-pane="round2" id="pane-round2">
       <div class="input-group mb-3">
-        <span class="input-group-text"><i class="bi bi-keyboard"></i></span>
-        <input type="text" class="form-control" id="answer-input" autocomplete="off"
-               spellcheck="false" placeholder="输入你听到的单词拼写" disabled>
+        <span class="input-group-text d-none d-sm-flex"><i class="bi bi-keyboard"></i></span>
+        <input type="text" class="form-control" id="answer-input" placeholder="输入你听到的单词拼写"
+               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               enterkeyhint="done" disabled>
         <button class="btn btn-primary" id="answer-submit" disabled>提交</button>
       </div>
       <div class="timer-track"><div class="timer-fill" id="round2-timer"></div></div>

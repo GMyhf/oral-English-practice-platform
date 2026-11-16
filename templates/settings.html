@@ -17,15 +17,15 @@
       <div class="mb-4">
         <label class="form-label" for="default_count">默认题量（1-100）</label>
         <input type="number" class="form-control" id="default_count" name="default_count"
-               min="1" max="100" step="1" value="{{ user.default_count }}">
+               min="1" max="100" step="1" inputmode="numeric" value="{{ user.default_count }}">
         <div class="form-text">看读译 / 听读写的默认抽词数量，设计文档建议 20。</div>
       </div>
 
       <div class="mb-4">
         <label class="form-label" for="time_limit">近似音每题限时（秒，0.2-30）</label>
         <input type="number" class="form-control" id="time_limit" name="time_limit"
-               min="0.2" max="30" step="0.1" value="{{ user.time_limit }}">
-        <div class="form-text">按下 1 / 2 之前的可用时间，默认 1 秒。</div>
+               min="0.2" max="30" step="0.1" inputmode="decimal" value="{{ user.time_limit }}">
+        <div class="form-text">点卡片（或按 1 / 2）作答之前的可用时间，默认 1 秒。</div>
       </div>
 
       <div class="mb-4">

@@ -1,7 +1,8 @@
 /* vowel.js · 近似音区分练习
-   流程按设计文档：屏幕标出两个选项 1/2 → 随机播放其中一个 → 限时内按键盘 1/2 →
-   立刻给出对错并进入下一题；结束后一次性提交全部作答，跳转到结果页逐题回看。
-   单词练习播的是 3B 的单词音频，句子练习播的是 4A 的整句，选项只有句中变化的那两个词。 */
+   流程按设计文档：屏幕标出两个选项 1/2 → 随机播放其中一个 → 限时内点卡片（或按键盘 1/2）
+   作答 → 立刻给出对错并进入下一题；结束后一次性提交全部作答，跳转到结果页逐题回看。
+   单词练习播的是 3B 的单词音频，句子练习播的是 4A 的整句，选项只有句中变化的那两个词。
+   作答入口有两个：卡片本身是按钮，手机上点一下就算选；键盘 1/2 留给用电脑的人。 */
 (() => {
   const $ = id => document.getElementById(id);
 
@@ -56,6 +57,8 @@
   }
 
   $("btn-start").addEventListener("click", async () => {
+    // 同步执行，还在用户手势里：手机上先把共用的那条音轨解锁，后面每题的自动播放才被放行
+    Common.unlockAudio();
     const params = readParams();
     $("btn-start").disabled = true;
     try {
@@ -87,13 +90,44 @@
   });
   refreshModeHint();
 
+  // 手机上「刚那声到底读的哪个」不容易自查，给一个重播按钮。
+  // 只在倒计时开始后能按：正在播第一遍时按下去会抢掉同一个 <audio>，
+  // 第一遍的 onended 就被顶掉了，那一题会永远卡在「播放中」；判完成绩也禁用，
+  // 免得 700ms 的空档里按出下一题的声音泄题。
+  const replay = $("btn-replay");
+
+  function setReplayEnabled(on) {
+    if (replay) replay.disabled = !on;
+  }
+
+  if (replay) {
+    replay.addEventListener("click", async () => {
+      const question = questions[cursor];
+      if (!question) return;
+      setReplayEnabled(false);
+      try {
+        await Common.playUrl(question.audio_url);
+      } catch (err) {
+        Common.toast("这题没有可播放的音频", "warning");
+      } finally {
+        if (running && !answered) setReplayEnabled(true);
+      }
+    });
+  }
+
   function onKey(e) {
     if (!running || answered) return;
     if (e.key === "1" || e.key === "2") {
       e.preventDefault();
-      picked = Number(e.key);
-      if (timer) timer.stop(true);   // 倒计时已开始则立刻结束；还在播音频时先记下选择
+      choose(Number(e.key));
     }
+  }
+
+  /** 键盘和点卡片共用这一个入口：倒计时已开始就立刻结束，还在播音频时先记下选择 */
+  function choose(index) {
+    if (!running || answered) return;
+    picked = index;
+    if (timer) timer.stop(true);
   }
 
   function resetTimerUi() {
@@ -103,12 +137,23 @@
     $("timer-text").textContent = "播放音频中…";
   }
 
+  /** 选项卡是 <button>：手机上点一下就作答，也顺便能被键盘 Tab 到（Tab 后再按 1/2 或直接回车） */
   function renderOptions(question) {
-    $("options").innerHTML = question.options.map(opt => `
-      <div class="option-chip" data-index="${opt.index}">
-        <div class="num">${opt.index}</div>
-        <div class="txt">${opt.word}</div>
-      </div>`).join("");
+    const box = $("options");
+    box.innerHTML = question.options.map(opt => `
+      <button type="button" class="option-chip" data-index="${opt.index}"
+              aria-label="${opt.index} 号：${esc(opt.word)}">
+        <span class="num">${opt.index}</span>
+        <span class="txt">${esc(opt.word)}</span>
+      </button>`).join("");
+    box.querySelectorAll(".option-chip").forEach(chip => {
+      chip.addEventListener("click", () => choose(Number(chip.dataset.index)));
+    });
+  }
+
+  /** 已经判完的这题不能再点：把卡片置成 disabled，避免手指连点把下一题的选择带跑 */
+  function lockOptions() {
+    document.querySelectorAll(".option-chip").forEach(chip => { chip.disabled = true; });
   }
 
   async function nextQuestion() {
@@ -124,16 +169,18 @@
     $("feedback").innerHTML = "";
     renderOptions(question);
     $("hint").innerHTML = `正在播放（${VOICE_LABEL[question.voice] || "随机音色"}）…` +
-      '请按键盘 <kbd>1</kbd> 或 <kbd>2</kbd> 作答';
+      "请点下面的卡片作答";
     resetTimerUi();
+    setReplayEnabled(false);
 
     // 先播完音频再开始限时：单词录音普遍 1.0~1.4 秒，
     // 和倒计时同时起跑的话默认 1 秒限时会在听完之前判成「无回答」。
     try {
       await Common.playUrl(question.audio_url);
     } catch (err) {
-      $("hint").textContent = "音频播放失败，可直接按 1 / 2 猜测";
+      $("hint").textContent = "音频播放失败，可以点下面的卡片猜一个";
     }
+    setReplayEnabled(true);
 
     // 播放期间就已经按下编号（听得快），判完立刻进入下一题
     if (picked !== null) {
@@ -164,6 +211,7 @@
       if (chipIndex === question.answer) chip.classList.add("is-answer");
       if (chipIndex === index) chip.classList.add("picked");
     });
+    lockOptions();
 
     const played = question.options[question.answer - 1];
     // 整句要等答完才给：作答时看到句子就等于白送答案
@@ -181,10 +229,11 @@
     } else {
       $("feedback").innerHTML =
         `<div class="result-wrong"><i class="bi bi-x-circle-fill me-2"></i>答错了` +
-        ` —— 你按了 ${index}，播放的是 <b>${esc(played.word)}</b></div>` + sentence;
+        ` —— 你选了 ${index}，播放的是 <b>${esc(played.word)}</b></div>` + sentence;
     }
 
     $("hint").textContent = "即将进入下一题…";
+    setReplayEnabled(false);
 
     records.push({
       seq: question.seq,

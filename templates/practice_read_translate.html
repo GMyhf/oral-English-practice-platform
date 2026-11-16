@@ -14,31 +14,33 @@
     <div class="row g-3 align-items-end">
       <div class="col-md-3">
         <label class="form-label" for="count">题目数量</label>
-        <input type="number" class="form-control" id="count" min="1" max="100" value="{{ defaults.count }}">
+        <input type="number" class="form-control" id="count" min="1" max="100" inputmode="numeric"
+               value="{{ defaults.count }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="round1_seconds">第一轮 · 看词并朗读（秒）</label>
         <input type="number" class="form-control" id="round1_seconds"
                min="{{ rhythm.round1.min }}" max="{{ rhythm.round1.max }}" step="0.1"
-               value="{{ rhythm.round1.value }}">
+               inputmode="decimal" value="{{ rhythm.round1.value }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="round2_seconds">第二轮 · 看词写译文（秒）</label>
         <input type="number" class="form-control" id="round2_seconds"
                min="{{ rhythm.round2.min }}" max="{{ rhythm.round2.max }}" step="0.5"
-               value="{{ rhythm.round2.value }}">
+               inputmode="decimal" value="{{ rhythm.round2.value }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="round_gap">题目之间的停顿（秒）</label>
         <input type="number" class="form-control" id="round_gap"
                min="{{ rhythm.gap.min }}" max="{{ rhythm.gap.max }}" step="0.05"
-               value="{{ rhythm.gap.value }}">
+               inputmode="decimal" value="{{ rhythm.gap.value }}">
       </div>
     </div>
     <div class="alert alert-secondary py-2 mt-3 mb-0 small">
       <i class="bi bi-info-circle me-1"></i>
       第一轮每个单词展示上面填的秒数并录音，第二轮展示它作答。三段时长都能在这里改，
       填出格的值会被夹回上下限。开始后会请求麦克风权限，请选「允许」。
+      <span class="d-block mt-1">手机上第二轮点一下输入框就能打中文，键盘挡住题目时页面会自动挪上去。</span>
     </div>
     <button class="btn btn-success w-100 py-2 mt-3" id="btn-start">
       <i class="bi bi-play-fill me-2"></i>开始练习
@@ -47,7 +49,7 @@
 </div>
 
 <div class="card shadow-sm d-none" id="stage">
-  <div class="card-body text-center p-4">
+  <div class="card-body text-center p-3 p-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <span class="badge rounded-pill text-bg-success" id="progress">第 1 / 1 题</span>
       <span class="badge rounded-pill text-bg-light border" id="score">对 0 · 错 0</span>
@@ -68,8 +70,10 @@
 
     <div data-pane="round2" id="pane-round2">
       <div class="input-group mb-3">
-        <span class="input-group-text"><i class="bi bi-pencil"></i></span>
-        <input type="text" class="form-control" id="answer-input" autocomplete="off" placeholder="输入中文译文" disabled>
+        <span class="input-group-text d-none d-sm-flex"><i class="bi bi-pencil"></i></span>
+        <input type="text" class="form-control" id="answer-input" placeholder="输入中文译文"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               enterkeyhint="done" disabled>
         <button class="btn btn-success" id="answer-submit" disabled>提交</button>
       </div>
       <div class="timer-track"><div class="timer-fill" id="round2-timer"></div></div>

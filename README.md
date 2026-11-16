@@ -6,8 +6,11 @@ Flask + SQLite 后端，前端原生 HTML/CSS/JS + Bootstrap 5（CDN），录音
 ## 环境
 
 - Python 3.11+（开发环境为 3.14）
-- 浏览器：Chrome / Edge 最新版。录音用到 `getUserMedia`，
-  必须通过 `localhost` 或 HTTPS 访问，用局域网 IP 走 HTTP 时浏览器会禁用麦克风。
+- 浏览器：Chrome / Edge 最新版，手机上是 Chrome Android 与 iOS Safari。
+  录音用到 `getUserMedia`，必须通过 `localhost` 或 HTTPS 访问，
+  用局域网 IP 走 HTTP 时浏览器会禁用麦克风。
+- 推荐佩戴有线耳机：蓝牙耳机 100~300 毫秒的延迟会直接影响近似音辨听，
+  听读写的「边播边录」还会把外放的读音一起录进去。
 
 ## 快速开始
 
@@ -63,9 +66,9 @@ data/recordings/      用户朗读录音（已 gitignore，不进版本库）
 
 | 模块 | 第一轮 | 第二轮 |
 |---|---|---|
-| 近似音区分 `/practice/vowel` | 屏幕标出 1 / 2 两个词，随机播放其中一个（单词练习播 3B 的单词，句子练习播 4A 的整句，选项都只给变化的那两个词） | 限时内按键盘 `1` / `2`，默认 1 秒，音频播完才开始计时，判完立刻下一题 |
+| 近似音区分 `/practice/vowel` | 屏幕标出 1 / 2 两个词，随机播放其中一个（单词练习播 3B 的单词，句子练习播 4A 的整句，选项都只给变化的那两个词） | 限时内点选项卡作答（电脑上也可以按键盘 `1` / `2`），默认 1 秒，音频播完才开始计时，判完立刻下一题 |
 | 看读译 `/practice/read-translate` | 单词展示一轮时长并录音（默认 1 秒） | 单词展示二轮时长，键入中文译文（任写一项即可，默认 5 秒） |
-| 听读写 `/practice/listen-spell` | 播放音频后按一轮时长录音跟读（默认 1 秒） | 再播一次音频，二轮时长内键入拼写（默认 5 秒） |
+| 听读写 `/practice/listen-spell` | 默认「边播边录」：单词音频和录音同一时刻开始，跟着标准音念；音频放完后再走满一轮时长，每词录「音频本身 + 一轮时长」（默认那 1 秒就是音频之后的尾巴）。关掉开关则回到先听后录 | 再播一次音频，二轮时长内键入拼写（默认 5 秒） |
 
 看读译 / 听读写的单词音频每题随机播男声或女声（`words.audio_f` / `audio_m` 二选一），
 用户不能也不该去选发音人：练的是听出这个词，不是听惯某个人的音色。抽到的性别随题目
@@ -77,8 +80,35 @@ data/recordings/      用户朗读录音（已 gitignore，不进版本库）
 点「开始练习」时读一次并夹到边界内，中途改框不影响正在跑的这轮；三段毫秒数会存进会话
 params，结果页标成「第一轮（秒） = 3」这样的中文徽章。
 
+听读写还多一个「第一轮边播边录」开关（`tworounds.js` 里的 `overlap`，默认开着）。开着时
+点「开始练习」就先 `Recorder.prime()` 申请一次麦克风，之后每题复用同一条音轨——
+`getUserMedia` 每次要 0.1~0.5 秒，逐词重新申请会把标准音的开头吃掉，手机上还要逐题弹权限。
+每词的录音长度取「音频本身 + `round1_ms`」：音频还在放就一直录，放完之后再走满设置的那几秒，
+所以 0.9 秒的单词既不会把跟读切成半个音节，学生也有一段完整的时间自己念一遍；
+「第一轮」里填的秒数就是这段尾巴的长度（0.3~20 秒），音频那一段另算。
+代价是「我的朗读」里会混进标准音，戴耳机就干净了；开关状态一并存进 params，结果页显示
+「第一轮录音方式 = 边播边录 / 先听后录」，回看时能对上当时是按哪种方式录的。
+
 结束后统一提交到 `/api/practice/finish`，跳转 `/result/<会话 id>` 逐题回看，
 可以重听标准发音和自己的朗读。
+
+## 移动端
+
+- 近似音的两张选项卡本身就是 `<button>`，点一下就算作答，不用再找键盘；判完立即
+  `disabled`，连点不会把下一题的选择带跑。`static/css/style.css` 末尾的
+  `@media (pointer: coarse)` 把可点的元素抬到 44px，并加上 `touch-action: manipulation`
+  去掉双击缩放带来的约 300ms 点击延迟；`@media (hover: hover)` 让卡片浮起效果只在真
+  鼠标上出现，触屏点完不会粘住一个 `:hover`。
+- 打字环节：输入框固定 16 号字（低于这个值 iOS 会把整页放大）、`autocapitalize=off` +
+  `autocorrect=off` + `spellcheck=false`（免得手机把 `abandon` 改成 `Abandon` 或自作主张
+  换词）、`enterkeyhint=done`（键盘上那个键就是「提交」）。软键盘弹出时 `tworounds.js`
+  的 `revealAnswer()` 按 `visualViewport` 把输入框滚回视野中间，一题判完主动 `blur()`
+  把键盘收掉，别压着下一题。
+- 音频：`Common.playUrl` 整页复用同一个 `<audio>`，并在点「开始练习」的那个手势里先
+  `unlockAudio()` 放一段 1 毫秒静音——iOS Safari 只放行「用户手势里真的播过一次」的那个
+  元素，逐题 `new Audio()` 的话从第二题起就被当成自动播放拒掉，手机上等于全程静音。
+- 录音：`Recorder` 的麦克风流与 WAV 兜底用的 `AudioContext` 都是整场练习共用的，
+  练习结束（或启动失败）时 `releaseStream()` 关掉，浏览器那个录音红点不会一直亮着。
 
 ## 音频来源优先级
 
@@ -136,9 +166,10 @@ python scripts/init_db.py                               # 扫描并写 audio_f /
   但 Windows 上一个文件名存不下两份朗读，共用同一个音频、释义把两层意思合在一起。
 - iOS Safari 不支持 MediaRecorder 的 MP3 编码，`scripts/common.js` 在
   所有 `MediaRecorder` 类型都不支持时，回退用 Web Audio 自己编码 16-bit PCM WAV。
-- 开发服务器 `debug` 默认关闭（`FLASK_DEBUG=true` 可打开），
-  模板改动需要重启进程才会生效。
-- iOS Safari 不支持 MediaRecorder 的 MP3 编码，`scripts/common.js` 在
-  所有 `MediaRecorder` 类型都不支持时，回退用 Web Audio 自己编码 16-bit PCM WAV。
+  这条兜底路径在手机上更依赖「用户手势里建好 `AudioContext`」，所以边播边录的麦克风
+  是在点「开始练习」时就 `Recorder.prime()` 起好的；万一还是起不来，本题会跳过录音
+  只放音频，答题和判分不受影响，只是少一段回放。
+- 边播边录录到的音频里混着标准音：桌面 Chrome / Edge 的回声消除能压掉大半，
+  戴耳机最干净，蓝牙外放则几乎一定听得到底音。要只含自己声音的回放就把开关关掉。
 - 开发服务器 `debug` 默认关闭（`FLASK_DEBUG=true` 可打开），
   模板改动需要重启进程才会生效。

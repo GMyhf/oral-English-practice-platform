@@ -275,19 +275,28 @@ RHYTHM_LABELS = {
     "round_gap_ms": "题间停顿（秒）",
 }
 
+# 开关项不是时长，不能跟着除以 1000，单独给一套中文值
+SWITCH_LABELS = {
+    "overlap_record": ("第一轮录音方式", {True: "边播边录", False: "先听后录"}),
+}
+
 
 def humanize_params(params):
     """把 round1_ms=1000 这类内部字段渲染成「第一轮（秒）= 1」。"""
     out = {}
     for key, value in params.items():
         label = RHYTHM_LABELS.get(key)
-        if label is None:
-            out[key] = value
+        if label is not None:
+            try:
+                out[label] = f"{round(float(value) / 1000, 2):g}"
+            except (TypeError, ValueError):
+                out[label] = value      # 老数据里万一存了字符串，原样显示而不是报错
             continue
-        try:
-            out[label] = f"{round(float(value) / 1000, 2):g}"
-        except (TypeError, ValueError):
-            out[label] = value      # 老数据里万一存了字符串，原样显示而不是报错
+        if key in SWITCH_LABELS:
+            name, mapping = SWITCH_LABELS[key]
+            out[name] = mapping.get(bool(value), str(value))
+            continue
+        out[key] = value
     return out
 
 

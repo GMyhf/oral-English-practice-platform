@@ -7,13 +7,22 @@
   <p class="mb-0 opacity-75">练近似音辨听 · 练看词写译 · 练听音拼写，并可回放自己的朗读与标准发音对比</p>
 </div>
 
+<div class="alert alert-warning d-flex align-items-center gap-3" role="alert">
+  <i class="bi bi-headphones fs-2 flex-shrink-0"></i>
+  <div class="mb-0">
+    <strong>推荐佩戴有线耳机使用。</strong>
+    蓝牙耳机普遍有 100~300 毫秒的延迟，近似音区分听的就是那零点几秒的差别；
+    听读写边播边录时，外放的读音还会被一起录进「我的朗读」，戴上耳机最干净。
+  </div>
+</div>
+
 <div class="row g-4 mb-5">
   <div class="col-md-4">
     <div class="card module-card shadow-sm h-100" onclick="location.href='{{ url_for('practice_vowel') }}'">
       <div class="card-body">
         <div class="icon icon-vowel"><i class="bi bi-ear"></i></div>
         <h5 class="card-title">近似音区分</h5>
-        <p class="card-text text-muted">屏幕上给出两个相似单词，随机播放其中一个，在限时内按键盘 1 / 2 判断听到的是哪个。</p>
+        <p class="card-text text-muted">屏幕上给出两个相似单词，随机播放其中一个，在限时内点卡片（或按键盘 1 / 2）判断听到的是哪个。</p>
         <a href="{{ url_for('practice_vowel') }}" class="btn btn-warning">开始辨音</a>
       </div>
     </div>
@@ -33,7 +42,7 @@
       <div class="card-body">
         <div class="icon icon-listen"><i class="bi bi-headphones"></i></div>
         <h5 class="card-title">听读写</h5>
-        <p class="card-text text-muted">第一轮播放音频后录音跟读，第二轮再播一次音频键入拼写，两段时长开始前自己填（默认 1 秒 / 5 秒）。</p>
+        <p class="card-text text-muted">第一轮边播边录，跟着标准音一起念（也可改成先听后录），第二轮再播一次音频键入拼写，时长开始前自己填。</p>
         <a href="{{ url_for('practice_listen_spell') }}" class="btn btn-primary">开始训练</a>
       </div>
     </div>
@@ -77,13 +86,13 @@
     <h6 class="mb-3">近似音组一览</h6>
     <div class="table-responsive">
       <table class="table table-sm table-hover align-middle mb-0">
-        <thead class="table-light"><tr><th>组</th><th>音标对照</th><th>说明</th><th class="text-end">对立对</th></tr></thead>
+        <thead class="table-light"><tr><th>组</th><th>音标对照</th><th class="d-none d-md-table-cell">说明</th><th class="text-end">对立对</th></tr></thead>
         <tbody>
         {% for g in vowel_groups %}
           <tr>
             <td><a href="{{ url_for('practice_vowel', group=g.group_key) }}">{{ g.group_key }}</a></td>
             <td class="fw-semibold text-primary">{{ g.label }}</td>
-            <td class="text-muted small">{{ g.description }}</td>
+            <td class="text-muted small d-none d-md-table-cell">{{ g.description }}</td>
             <td class="text-end">{{ g.pair_count }}</td>
           </tr>
         {% endfor %}

@@ -5,7 +5,10 @@
      第一轮：屏幕展示单词，同时录音用户朗读
      第二轮：屏幕展示单词，键入中文译文（任一项即可）
    listen-spell（听读写）
-     第一轮：播放单词音频后录音跟读（不显示拼写）
+     第一轮：默认「边播边录」——麦克风和单词音频同一时刻发起，跟着标准音念；
+             每个词录「音频本身的长度 + 设置的第一轮时长」：音频还在放就跟着念，
+             音频放完后再走满设置的那几秒，独立把这个词念完整。
+             取消勾选就回到以前的顺序：先放完再录，同样是一轮时长。
      第二轮：再播一次音频，限时内键入正确拼写
 
    单词音频由后端每题随机挑一轨真人朗读（男声 / 女声），前端只看到 word.audio_url
@@ -14,6 +17,7 @@
    三段时长——第一轮、第二轮、题目之间的停顿——都从练习设置里的输入框读，
    默认值和 min/max 由 config.py 经 app.py 渲染进输入框，这里只负责按边界夹一遍；
    点「开始练习」时读一次并写进会话 params，中途改框不影响正在跑的这轮。
+   「边播边录」这个开关也一起进 params，因为它改变了「我的朗读」里听到的内容。
 
    结束后把所有作答一次性提交 /api/practice/finish，跳转结果页逐题回看。 */
 (() => {
@@ -29,6 +33,7 @@
       showWordRound2: true,
       playAudioRound1: false,
       playAudioRound2: false,
+      supportsOverlap: false,
       inputPlaceholder: "输入这个单词的中文译文（任写一项）",
       emptyAnswer: "无回答",
       roundNote: seconds => `展示 ${seconds} 秒，超时未提交记为无回答`,
@@ -39,6 +44,7 @@
       showWordRound2: false,
       playAudioRound1: true,
       playAudioRound2: true,
+      supportsOverlap: true,
       inputPlaceholder: "输入你听到的单词拼写",
       emptyAnswer: "无回答",
       roundNote: seconds => `播放后 ${seconds} 秒内提交，超时记为无回答`,
@@ -52,6 +58,7 @@
   let round1Ms = 1000;
   let round2Ms = 5000;
   let gapMs = 200;
+  let overlap = false;         // 听读写第一轮是否边播边录，点「开始练习」时定死
 
   let sessionId = null;
   let words = [];
@@ -79,6 +86,8 @@
   // ---------------------------------------------------------------- 开始
 
   $("btn-start").addEventListener("click", async () => {
+    // 第一行就做，而且要同步：手机上「用户手势里播过一次」的那条音轨才允许之后被脚本自动播放
+    Common.unlockAudio();
     const count = Number($("count").value) || 20;
     const seconds = {
       round1: readSeconds("round1_seconds"),
@@ -88,18 +97,27 @@
     round1Ms = Math.round(seconds.round1 * 1000);
     round2Ms = Math.round(seconds.round2 * 1000);
     gapMs = Math.round(seconds.gap * 1000);
+    // 看读译第一轮不放音频，没有「同时」可言，所以只有听读写认这个开关；
+    // 输入框不在（比如别处复用这段脚本）就按以前的「先听后录」走。
+    const overlapBox = $("overlap_record");
+    overlap = !!(cfg.supportsOverlap && overlapBox && overlapBox.checked);
     const note = $("round2-note");
     if (note && cfg.roundNote) note.textContent = cfg.roundNote(seconds.round2);
     $("btn-start").disabled = true;
     try {
+      const params = {
+        count,
+        round1_ms: round1Ms,
+        round2_ms: round2Ms,
+        round_gap_ms: gapMs
+      };
+      if (cfg.supportsOverlap) {
+        // 边播边录会把标准音一起录进「我的朗读」，结果页得说清这一轮是怎么录的
+        params.overlap_record = overlap;
+      }
       const sess = await Common.api("/api/practice/session", {
         practice_type: practiceType,
-        params: {
-          count,
-          round1_ms: round1Ms,
-          round2_ms: round2Ms,
-          round_gap_ms: gapMs
-        }
+        params
       });
       sessionId = sess.session_id;
 
@@ -114,6 +132,18 @@
       // 浏览器语音列表是异步加载的，不预热的话第一个单词的合成发音完全无声
       await Common.warmUpSpeech();
 
+      if (overlap) {
+        // 麦克风提前到「开始练习」这一次点击里申请：权限弹窗只会出现一次，
+        // 之后每个词起录只剩几毫秒，标准音的开头不会被 getUserMedia 的延迟吃掉。
+        // iOS Safari 也要求 AudioContext 在用户手势中建好，这里一并办掉。
+        try {
+          await Recorder.prime();
+        } catch (err) {
+          micBroken = true;
+          Common.toast(`无法录音（${err.message}），本次练习只放音频、跳过跟读`, "warning", 5000);
+        }
+      }
+
       if (window.WordAudio) {
         WordAudio.setWordList(words);
         await WordAudio.refresh().catch(() => {});
@@ -126,13 +156,17 @@
     } catch (err) {
       Common.toast(err.message, "danger");
       $("btn-start").disabled = false;
+      releaseMic();
     }
   });
 
   // ---------------------------------------------------------------- 第一轮：录音
 
   async function runRound1() {
-    setStageTitle(`第一轮 · 朗读（每词 ${round1Ms / 1000} 秒，共 ${words.length} 个词）`);
+    const seconds = secondsOf(round1Ms);
+    setStageTitle(overlap
+      ? `第一轮 · 边听边跟读（每词 = 标准音 + ${seconds} 秒，共 ${words.length} 个词）`
+      : `第一轮 · 朗读（每词 ${seconds} 秒，共 ${words.length} 个词）`);
     setPane("round1");
     // 第一轮不显示作答框，先把它们置为不可用，避免"看不见但仍可输入"的状态
     $("answer-input").disabled = true;
@@ -140,13 +174,17 @@
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
       const seq = i + 1;
-      setProgress(seq, words.length, "请大声朗读");
+      setProgress(seq, words.length, overlap ? "请跟着标准音大声念" : "请大声朗读");
       showWord(word, cfg.showWordRound1);
       setTimerBar(0);
 
-      if (cfg.playAudioRound1) await playStandard(word);
-
-      const blobInfo = await recordFor(round1Ms);
+      let blobInfo = null;
+      if (overlap) {
+        blobInfo = await playAndRecord(word);
+      } else {
+        if (cfg.playAudioRound1) await playStandard(word);
+        blobInfo = await recordFor(round1Ms);
+      }
       if (blobInfo) {
         try {
           const saved = await uploadRecording(blobInfo.blob, blobInfo.ext, {
@@ -162,32 +200,106 @@
     await runRound2();
   }
 
+  /** 边播边录：起录和起播在同一拍发起，每词的录音长度 = 标准音本身 + 设置的第一轮时长。
+      先把标准音放完（这段时间麦克风一直开着，跟着念），音频结束后再走满填的秒数，
+      让他独立把这个词念完整——真人音频普遍 0.5~2 秒，只取「音频与设置值的较大者」会把
+      跟读挤到音频尾巴上，念完最后一个音节时录制正好切断。
+      录下来的音频里会混进标准音——桌面 Chrome/Edge 的回声消除能压掉大半，戴耳机最干净，
+      所以首页建议插耳机。判分不受影响：听读写看的是第二轮键入的拼写。 */
+  async function playAndRecord(word) {
+    if (micBroken || !Recorder.supported()) {
+      // 录不了也不能把标准音省掉，那这一题就什么都听不到了
+      if (!micBroken) markMicBroken("麦克风不可用，本次练习跳过录音，只判答题目");
+      await playStandard(word);
+      await timedBar(round1Ms);
+      return null;
+    }
+
+    let stream = null;
+    try {
+      stream = await Recorder.openStream();
+    } catch (err) {
+      markMicBroken(`无法录音（${err.message}），后续题目跳过录音`);
+      await playStandard(word);
+      await timedBar(round1Ms);
+      return null;
+    }
+
+    const tail = secondsOf(round1Ms);
+    const rec = new Recorder();
+    const micOn = rec.start(stream);          // 不 await：两个动作同一时刻发起
+    const play = trackPlayback(playStandard(word));
+    setRecordingDot(true);
+    try {
+      await micOn;
+      // 第一段：标准音播放中。麦克风已经在录了，进度条先顶着满格，倒计时从第二段才开始，
+      //         这样「你填的秒数」就是音频放完之后实打实留给嘴巴的时间。
+      setTimerBar(1);
+      if (!play.finished()) {
+        $("hint").textContent = `正在放标准音，跟着念…（放完再给你 ${tail} 秒）`;
+        // 没有音频或播放失败时这里会 reject：那一段本来就不存在，直接进第二段
+        await play.promise.catch(() => {});
+      }
+      // 第二段：音频放完，再走满用户填的时长
+      $("hint").textContent = `标准音已放完，自己再念一遍（${tail} 秒）`;
+      await timedBar(round1Ms);
+      const result = await rec.stop();
+      return result.blob && result.blob.size > 0 ? result : null;
+    } catch (err) {
+      markMicBroken(`无法录音（${err.message}），后续题目跳过录音`);
+      await play.promise.catch(() => {});
+      return null;
+    } finally {
+      setRecordingDot(false);
+    }
+  }
+
+  /** 包一层播放 Promise，好知道「播完了没有」——边播边录要等这一段放完才开始倒计时 */
+  function trackPlayback(promise) {
+    let done = false;
+    const wrapped = promise.then(
+      value => { done = true; return value; },
+      err => { done = true; throw err; }
+    );
+    return { promise: wrapped, finished: () => done };
+  }
+
+  function markMicBroken(message) {
+    micBroken = true;
+    Common.toast(message, "warning");
+  }
+
+  function setRecordingDot(on) {
+    const dot = $("rec-dot");
+    if (!dot) return;
+    dot.classList.toggle("d-none", !on);
+    dot.classList.toggle("recording", on);
+  }
+
+  /** 麦克风整场共用，练习一结束就关掉，别让用户以为还在录 */
+  function releaseMic() {
+    if (window.Recorder && Recorder.releaseStream) Recorder.releaseStream();
+  }
+
   async function recordFor(ms) {
     if (micBroken || !Recorder.supported()) {
-      if (!micBroken) {
-        micBroken = true;
-        Common.toast("麦克风不可用，本次练习跳过录音，只判答题目", "warning");
-      }
+      if (!micBroken) markMicBroken("麦克风不可用，本次练习跳过录音，只判答题目");
       await timedBar(ms);
       return null;
     }
     try {
       recorder = new Recorder();
       await recorder.start();
-      $("rec-dot").classList.remove("d-none");
-      $("rec-dot").classList.add("recording");
+      setRecordingDot(true);
       await timedBar(ms);
       const result = await recorder.stop();
       return result.blob && result.blob.size > 0 ? result : null;
     } catch (err) {
-      micBroken = true;
-      Common.toast(`无法录音（${err.message}），后续题目跳过录音`, "warning");
+      markMicBroken(`无法录音（${err.message}），后续题目跳过录音`);
       await timedBar(ms);
       return null;
     } finally {
-      const dot = $("rec-dot");
-      dot.classList.add("d-none");
-      dot.classList.remove("recording");
+      setRecordingDot(false);
     }
   }
 
@@ -205,7 +317,7 @@
       $("answer-input").placeholder = cfg.inputPlaceholder;
       $("answer-input").disabled = false;
       $("answer-submit").disabled = false;
-      $("answer-input").focus();
+      $("answer-input").focus();   // 手机上脚本 focus 不会弹键盘，靠下面的 focus 监听兜住
 
       let submitted = null;
       let done = false;
@@ -258,6 +370,8 @@
       // 以及回跳到第一轮时，看不见的输入框不应该还能被键盘敲进去
       $("answer-submit").onclick = null;
       $("answer-input").onkeydown = null;
+      // 手机上还要把键盘收起来：焦点留在已经 disabled 的输入框上，键盘会一直压着下一题
+      if (document.activeElement === $("answer-input")) $("answer-input").blur();
       $("answer-input").disabled = true;
       $("answer-submit").disabled = true;
       await Common.wait(gapMs);
@@ -329,6 +443,34 @@
     $("round1-bar").style.width = `${ratio * 100}%`;
   }
 
+  /** 毫秒念成人话：0.3 秒不能写成 0.30000000000000004，也不能写成 0.30 */
+  function secondsOf(ms) {
+    return String(Math.round(ms / 100) / 10);
+  }
+
+  /** 触控设备上的两件小事：脚本 focus() 不会弹键盘，而键盘一弹就把输入框顶出屏幕。
+      所以「拿到焦点」和「可视区域变小（键盘开合）」两个时机都把正在作答的那一行拉回中间。 */
+  function revealAnswer() {
+    const el = $("answer-input");
+    if (!el || document.activeElement !== el) return;
+    const vv = window.visualViewport;
+    // 键盘上沿所在的可视高度：Chrome/Android 与 iOS Safari 都会缩小 visualViewport
+    const visibleBottom = vv ? vv.height + vv.offsetTop : window.innerHeight;
+    const box = el.getBoundingClientRect();
+    if (box.bottom > visibleBottom - 16 || box.top < 0) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  const answerInput = $("answer-input");
+  if (answerInput) {
+    answerInput.addEventListener("focus", () => setTimeout(revealAnswer, 260));
+  }
+  if (window.visualViewport) {
+    // 键盘弹出/收起都算一次 resize，260ms 是留给键盘动画的时间
+    window.visualViewport.addEventListener("resize", () => setTimeout(revealAnswer, 260));
+  }
+
   async function timedBar(ms) {
     const started = Date.now();
     return new Promise(resolve => {
@@ -350,6 +492,7 @@
   async function finish() {
     $("stage").classList.add("d-none");
     $("finishing").classList.remove("d-none");
+    releaseMic();          // 跳转结果页之前先把录音灯关掉
     try {
       const res = await Common.api("/api/practice/finish", { session_id: sessionId, records });
       location.href = res.result_url;

@@ -4,7 +4,7 @@
 {% block content %}
 <div class="hero">
   <h1>近似音区分</h1>
-  <p class="mb-0 opacity-75">听音频，判断刚才读的是屏幕上编号 1 还是 2 的那个词</p>
+  <p class="mb-0 opacity-75">听音频，点屏幕上编号 1 / 2 的卡片，判断刚才读的是哪个词</p>
 </div>
 
 <!-- 1. 设置 -->
@@ -27,13 +27,13 @@
       </div>
       <div class="col-md-3">
         <label class="form-label" for="count">题目数量</label>
-        <input type="number" class="form-control" id="count" min="1" max="100"
+        <input type="number" class="form-control" id="count" min="1" max="100" inputmode="numeric"
                value="{{ defaults.count }}">
       </div>
       <div class="col-md-3">
         <label class="form-label" for="time_limit">每题限时（秒）</label>
         <input type="number" class="form-control" id="time_limit" min="0.2" max="30" step="0.1"
-               value="{{ defaults.time_limit }}">
+               inputmode="decimal" value="{{ defaults.time_limit }}">
       </div>
 
       <div class="col-md-6">
@@ -60,7 +60,8 @@
 
     <div class="alert alert-secondary mt-3 mb-3 py-2 small">
       <i class="bi bi-info-circle me-1"></i>
-      开始后请把手放在键盘 <kbd>1</kbd> <kbd>2</kbd> 上。每题限时到点未作答会记为「无回答」，
+      开始后直接<strong>点屏幕上的 1 号 / 2 号卡片</strong>作答，手机上不用找键盘；
+      用电脑可以按键盘 <kbd>1</kbd> <kbd>2</kbd>。每题限时到点未作答会记为「无回答」，
       判完立刻进入下一题。
     </div>
     <button class="btn btn-warning w-100 py-2" id="btn-start">
@@ -71,7 +72,7 @@
 
 <!-- 2. 进行中 -->
 <div class="card shadow-sm d-none" id="stage">
-  <div class="card-body text-center p-4">
+  <div class="card-body text-center p-3 p-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <span class="badge rounded-pill text-bg-warning" id="progress">第 1 / 1 题</span>
       <span class="badge rounded-pill text-bg-light border" id="score">对 0 · 错 0</span>
@@ -83,6 +84,11 @@
 
     <div class="timer-track mb-2"><div class="timer-fill" id="timer-fill"></div></div>
     <div class="text-muted small mb-3" id="timer-text">剩余 1.0 秒</div>
+
+    <button class="btn btn-outline-warning btn-sm mb-3" id="btn-replay">
+      <i class="bi bi-volume-up me-1"></i>再听一遍
+    </button>
+    <div class="text-muted small mb-2">听不清就重播，重听不额外加时</div>
 
     <div id="feedback"></div>
   </div>
