@@ -22,3 +22,9 @@ data/recordings/
 # SQLite 库由 scripts/init_db.py 生成，里面是账号哈希与成绩，同样不进版本库
 data/*.db
 data/*.db-journal
+# 手动改库前留下的备份（app.db.bak-xxx）里同样是密码哈希，别误提交
+data/*.db.bak-*
+
+# 句子导入清单由本地转写脚本生成，里面是录音包在这台机器上的绝对路径，不进版本库；
+# 真正要提交的是 scripts/sentence_texts.json（整句文本）和 static/audio/sentence 的音频
+scripts/sentence_manifest.json

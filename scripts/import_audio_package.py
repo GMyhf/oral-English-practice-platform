@@ -1,16 +1,20 @@
 # scripts/import_audio_package.py
-"""把教材配套录音（E-Prime 版）里的 3B / 3A 音频复制进本项目，命名沿用平台约定。
+"""把教材配套录音（E-Prime 版）里的 3B / 4A / 3A 音频复制进本项目，命名沿用平台约定。
 
 用法（在项目根目录）：
     python scripts/import_audio_package.py --dry-run          # 只体检，不写文件
     python scripts/import_audio_package.py                    # 复制全部
     python scripts/import_audio_package.py --only vowel       # 只补近似音组
+    python scripts/import_audio_package.py --only sentence    # 只补句子近似音
     python scripts/import_audio_package.py --source "D:\\录音包"  # 换源目录
 
+3B（单词对立对）与 3A（单词朗读）直接从文件名取信息；4A（句子里的单词对立）文件名
+只有「课.组.选项.对立对」，需要先跑语音转写生成 scripts/sentence_manifest.json。
 复制完再执行 python scripts/init_db.py，由它把音频登记到 vowel_groups /
-vowel_items / words.audio_path。脚本是幂等的：目标文件已存在且大小相同就跳过。
+vowel_items / sentence_items / words.audio_path。脚本是幂等的：目标文件已存在且大小相同就跳过。
 """
 import argparse
+import json
 import os
 import re
 import shutil
@@ -20,12 +24,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from init_db import (  # noqa: E402  复用同一套文件名规则，避免两处各写一份
     AUDIO_NAME_RE,
     BASE_DIR,
+    SENTENCE_AUDIO_DIR,
+    SENTENCE_TEXTS as SENTENCE_TEXTS_JSON,
     VOWEL_AUDIO_DIR,
     VOWEL_GROUP_LABELS,
     WORD_AUDIO_DIR,
 )
 
 DEFAULT_SOURCE = r"C:\Users\10420\Desktop\English\教材配套录音E-prime版\教材配套录音E-prime版"
+# 4A 句子要先把音频转成文字才能出题，转写清单由 stt 脚本生成后放在这里
+DEFAULT_MANIFEST = os.path.join(BASE_DIR, "scripts", "sentence_manifest.json")
 
 # 课号 → [(3B 子目录, 组名)]。教材只有第 10 课把近似音拆成 a / c 两个小组。
 GROUP_SOURCES = {
@@ -134,6 +142,52 @@ def import_vowel(lessons, size_box, dry_run):
     return groups
 
 
+def import_sentences(size_box, dry_run, manifest_path):
+    """4A 句子音频 → static/audio/sentence/<组名>/<对立对>.<选项>-<词>.<f|m>.mp3
+
+    4A 的文件名只到「课.组.选项.对立对」，既不带单词也不标性别，所以这一步依赖语音
+    转写产出的清单（默认 scripts/sentence_manifest.json）：清单里已经按基频把 q / s
+    两个发音人分成女声 / 男声，并给出识别出来的整句。整句文本另外写到
+    scripts/sentence_texts.json，由 init_db.py 登记进 sentence_items。
+    """
+    if not os.path.isfile(manifest_path):
+        print("  找不到句子清单，先跑转写生成：", manifest_path)
+        return 0
+
+    with open(manifest_path, encoding="utf-8") as fh:
+        entries = json.load(fh)["items"]
+
+    texts = {}
+    kept = 0
+    missing_src = []
+    for entry in entries:
+        group_key = entry["group_key"]
+        item_no, option_no, word = entry["item_no"], entry["option_no"], entry["word"]
+        for voice in ("f", "m"):
+            src = entry.get("src_" + voice)
+            if not src:
+                continue
+            if not os.path.isfile(src):
+                missing_src.append(src)
+                continue
+            ext = os.path.splitext(src)[1].lower()
+            dst = os.path.join(SENTENCE_AUDIO_DIR, group_key,
+                               f"{item_no}.{option_no}-{word}.{voice}{ext}")
+            copy_file(src, dst, size_box, dry_run)
+            kept += 1
+        texts.setdefault(group_key, {})[f"{item_no}.{option_no}"] = entry["sentence"]
+
+    if not dry_run:
+        with open(SENTENCE_TEXTS_JSON, "w", encoding="utf-8") as fh:
+            json.dump(texts, fh, ensure_ascii=False, indent=1, sort_keys=True)
+
+    print(f"  句子音频 {kept} 个、整句文本 {sum(len(v) for v in texts.values())} 条"
+          f"（{len(texts)} 组）")
+    if missing_src:
+        print(f"  清单里有 {len(missing_src)} 个源文件不存在，已跳过，例如 {missing_src[0]}")
+    return kept
+
+
 def import_words(lessons, size_box, dry_run):
     """3A → static/audio/word/<word>.<ext>，只取女声（words.audio_path 只有一个字段）。"""
     taken = {}
@@ -170,7 +224,9 @@ def import_words(lessons, size_box, dry_run):
 def main():
     parser = argparse.ArgumentParser(description="导入教材配套录音的 3B / 3A 音频")
     parser.add_argument("--source", default=os.environ.get("AUDIO_PACKAGE_DIR", DEFAULT_SOURCE))
-    parser.add_argument("--only", choices=("all", "vowel", "word"), default="all")
+    parser.add_argument("--only", choices=("all", "vowel", "word", "sentence"), default="all")
+    parser.add_argument("--manifest", default=os.environ.get("SENTENCE_MANIFEST", DEFAULT_MANIFEST),
+                        help="4A 句子的转写清单（含性别切分与整句文本）")
     parser.add_argument("--dry-run", action="store_true", help="只统计要复制多少文件，不写盘")
     args = parser.parse_args()
 
@@ -185,6 +241,9 @@ def main():
     if args.only in ("all", "vowel"):
         print("[3B 近似音组]")
         import_vowel(lessons, size_box, args.dry_run)
+    if args.only in ("all", "sentence"):
+        print("[4A 句子近似音]")
+        import_sentences(size_box, args.dry_run, args.manifest)
     if args.only in ("all", "word"):
         print("[3A 单词音频]")
         import_words(lessons, size_box, args.dry_run)

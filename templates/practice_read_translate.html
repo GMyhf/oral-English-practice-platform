@@ -12,17 +12,33 @@
   <div class="card-body">
     <h6 class="mb-3"><i class="bi bi-gear me-2"></i>练习设置</h6>
     <div class="row g-3 align-items-end">
-      <div class="col-md-4">
+      <div class="col-md-3">
         <label class="form-label" for="count">题目数量</label>
         <input type="number" class="form-control" id="count" min="1" max="100" value="{{ defaults.count }}">
       </div>
-      <div class="col-md-8">
-        <div class="alert alert-secondary py-2 mb-0 small">
-          <i class="bi bi-info-circle me-1"></i>
-          第一轮每个单词展示 <strong>1 秒</strong>并录音；第二轮每个单词展示 <strong>5 秒</strong>，
-          键入中文译文的任意一项。开始后会请求麦克风权限，请选「允许」。
-        </div>
+      <div class="col-md-3">
+        <label class="form-label" for="round1_seconds">第一轮 · 看词并朗读（秒）</label>
+        <input type="number" class="form-control" id="round1_seconds"
+               min="{{ rhythm.round1.min }}" max="{{ rhythm.round1.max }}" step="0.1"
+               value="{{ rhythm.round1.value }}">
       </div>
+      <div class="col-md-3">
+        <label class="form-label" for="round2_seconds">第二轮 · 看词写译文（秒）</label>
+        <input type="number" class="form-control" id="round2_seconds"
+               min="{{ rhythm.round2.min }}" max="{{ rhythm.round2.max }}" step="0.5"
+               value="{{ rhythm.round2.value }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="round_gap">题目之间的停顿（秒）</label>
+        <input type="number" class="form-control" id="round_gap"
+               min="{{ rhythm.gap.min }}" max="{{ rhythm.gap.max }}" step="0.05"
+               value="{{ rhythm.gap.value }}">
+      </div>
+    </div>
+    <div class="alert alert-secondary py-2 mt-3 mb-0 small">
+      <i class="bi bi-info-circle me-1"></i>
+      第一轮每个单词展示上面填的秒数并录音，第二轮展示它作答。三段时长都能在这里改，
+      填出格的值会被夹回上下限。开始后会请求麦克风权限，请选「允许」。
     </div>
     <button class="btn btn-success w-100 py-2 mt-3" id="btn-start">
       <i class="bi bi-play-fill me-2"></i>开始练习
@@ -57,7 +73,7 @@
         <button class="btn btn-success" id="answer-submit" disabled>提交</button>
       </div>
       <div class="timer-track"><div class="timer-fill" id="round2-timer"></div></div>
-      <div class="text-muted small mt-2">展示 5 秒，超时未提交记为无回答</div>
+      <div class="text-muted small mt-2" id="round2-note">展示 {{ rhythm.round2.value }} 秒，超时未提交记为无回答</div>
     </div>
   </div>
 </div>

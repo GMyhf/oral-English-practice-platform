@@ -23,7 +23,7 @@
       <div class="card-body">
         <div class="icon icon-read"><i class="bi bi-translate"></i></div>
         <h5 class="card-title">看读译</h5>
-        <p class="card-text text-muted">第一轮每个单词展示 1 秒并录音，第二轮每个单词展示 5 秒，键入中文译文。</p>
+        <p class="card-text text-muted">第一轮展示单词并录音，第二轮键入中文译文，两段时长开始前自己填（默认 1 秒 / 5 秒）。</p>
         <a href="{{ url_for('practice_read_translate') }}" class="btn btn-success">开始训练</a>
       </div>
     </div>
@@ -33,7 +33,7 @@
       <div class="card-body">
         <div class="icon icon-listen"><i class="bi bi-headphones"></i></div>
         <h5 class="card-title">听读写</h5>
-        <p class="card-text text-muted">第一轮播放音频后录音跟读，第二轮再播一次音频，在 5 秒内键入正确拼写。</p>
+        <p class="card-text text-muted">第一轮播放音频后录音跟读，第二轮再播一次音频键入拼写，两段时长开始前自己填（默认 1 秒 / 5 秒）。</p>
         <a href="{{ url_for('practice_listen_spell') }}" class="btn btn-primary">开始训练</a>
       </div>
     </div>

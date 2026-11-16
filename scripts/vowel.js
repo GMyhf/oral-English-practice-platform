@@ -1,8 +1,13 @@
 /* vowel.js · 近似音区分练习
-   流程按设计文档：屏幕标出两个单词 1/2 → 随机播放其中一个 → 限时内按键盘 1/2 →
-   立刻给出对错并进入下一题；结束后一次性提交全部作答，跳转到结果页逐题回看。 */
+   流程按设计文档：屏幕标出两个选项 1/2 → 随机播放其中一个 → 限时内按键盘 1/2 →
+   立刻给出对错并进入下一题；结束后一次性提交全部作答，跳转到结果页逐题回看。
+   单词练习播的是 3B 的单词音频，句子练习播的是 4A 的整句，选项只有句中变化的那两个词。 */
 (() => {
   const $ = id => document.getElementById(id);
+
+  const VOICE_LABEL = { f: "女声", m: "男声" };
+  const MODE_HINT_DEFAULT = "句子练习放的是含该词的整句，屏幕上仍然只给句中变化的那两个词。";
+  const esc = text => String(text).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
   let sessionId = null;
   let questions = [];
@@ -14,15 +19,40 @@
   let picked = null;
   let answered = false;
   let running = false;
+  let mode = "word";
 
   function readParams() {
     return {
       group_key: $("group_key").value,
       count: Number($("count").value) || 10,
       mode: (document.querySelector('input[name="mode"]:checked') || {}).value || "word",
-      voice: (document.querySelector('input[name="voice"]:checked') || {}).value || "f",
+      // 性别不再由用户选：不传 voice，后端按每题随机抽男声或女声
       time_limit: Number($("time_limit").value) || 1
     };
+  }
+
+  // 句子音频只覆盖了部分近似音组，选到没有句子的组时提前说清楚，别等点开始才报错
+  function refreshModeHint() {
+    const box = $("mode-hint");
+    if (!box) return;
+    const opt = $("group_key").selectedOptions[0];
+    const params = readParams();
+    if (params.mode !== "sentence") {
+      box.className = "form-text";
+      box.textContent = MODE_HINT_DEFAULT;
+      return;
+    }
+    const sentencePairs = Number((opt && opt.dataset.sentencePairs) || 0);
+    const wordPairs = Number((opt && opt.dataset.wordPairs) || 0);
+    if (!sentencePairs) {
+      box.className = "form-text text-danger";
+      box.textContent = `${opt.value} 这组还没有句子音频（单词题有 ${wordPairs} 组），` +
+        "先换一组，或跑 scripts/import_audio_package.py --only sentence 补。";
+    } else {
+      box.className = "form-text";
+      box.textContent = `${opt.value} 有 ${sentencePairs} 组句子音频，` +
+        "每题播放整句，屏幕上只给句中变化的那两个词。";
+    }
   }
 
   $("btn-start").addEventListener("click", async () => {
@@ -36,6 +66,7 @@
 
       const data = await Common.api("/api/vowel/questions", params);
       questions = data.questions;
+      mode = data.mode || params.mode;
       timeLimit = params.time_limit;
       if (!questions.length) throw new Error("没有抽到题目");
 
@@ -49,6 +80,12 @@
       $("btn-start").disabled = false;
     }
   });
+
+  ["change"].forEach(evt => {
+    $("group_key").addEventListener(evt, refreshModeHint);
+    document.querySelectorAll('input[name="mode"]').forEach(radio => radio.addEventListener(evt, refreshModeHint));
+  });
+  refreshModeHint();
 
   function onKey(e) {
     if (!running || answered) return;
@@ -86,7 +123,8 @@
     $("score").textContent = `对 ${stats.right} · 错 ${stats.wrong}`;
     $("feedback").innerHTML = "";
     renderOptions(question);
-    $("hint").innerHTML = '正在播放音频…请按键盘 <kbd>1</kbd> 或 <kbd>2</kbd> 作答';
+    $("hint").innerHTML = `正在播放（${VOICE_LABEL[question.voice] || "随机音色"}）…` +
+      '请按键盘 <kbd>1</kbd> 或 <kbd>2</kbd> 作答';
     resetTimerUi();
 
     // 先播完音频再开始限时：单词录音普遍 1.0~1.4 秒，
@@ -127,18 +165,23 @@
       if (chipIndex === index) chip.classList.add("picked");
     });
 
+    const played = question.options[question.answer - 1];
+    // 整句要等答完才给：作答时看到句子就等于白送答案
+    const sentence = played.sentence
+      ? `<div class="small text-muted mt-1">原句：${esc(played.sentence)}</div>` : "";
+
     if (index === null) {
       $("feedback").innerHTML =
         `<div class="result-wrong"><i class="bi bi-hourglass-split me-2"></i>无回答` +
-        ` —— 正确的是 <b>${question.answer}</b>（${question.options[question.answer - 1].word}）</div>`;
+        ` —— 正确的是 <b>${question.answer}</b>（${esc(played.word)}）</div>` + sentence;
     } else if (correct) {
       $("feedback").innerHTML =
         `<div class="result-correct"><i class="bi bi-check-circle-fill me-2"></i>答对了` +
-        ` —— 播放的是 <b>${question.options[question.answer - 1].word}</b></div>`;
+        ` —— 播放的是 <b>${esc(played.word)}</b></div>` + sentence;
     } else {
       $("feedback").innerHTML =
         `<div class="result-wrong"><i class="bi bi-x-circle-fill me-2"></i>答错了` +
-        ` —— 你按了 ${index}，播放的是 <b>${question.options[question.answer - 1].word}</b></div>`;
+        ` —— 你按了 ${index}，播放的是 <b>${esc(played.word)}</b></div>` + sentence;
     }
 
     $("hint").textContent = "即将进入下一题…";
@@ -148,9 +191,11 @@
       type: "vowel",
       question: {
         type: "vowel",
+        mode: mode,
         group_key: question.group_key,
         options: question.options,
         answer: question.answer,
+        voice: question.voice,
         audio_url: question.audio_url
       },
       user_answer: index,

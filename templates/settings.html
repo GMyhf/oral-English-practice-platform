@@ -30,15 +30,13 @@
 
       <div class="mb-4">
         <label class="form-label">近似音音频性别</label>
-        <div class="btn-group d-flex" role="group">
-          <input type="radio" class="btn-check" name="voice" id="voice_f" value="f"
-                 {{ 'checked' if user.voice != 'm' }}>
-          <label class="btn btn-outline-primary" for="voice_f">女声</label>
-          <input type="radio" class="btn-check" name="voice" id="voice_m" value="m"
-                 {{ 'checked' if user.voice == 'm' }}>
-          <label class="btn btn-outline-primary" for="voice_m">男声</label>
+        <div class="form-control-plaintext text-muted">
+          <i class="bi bi-shuffle me-1"></i>每题随机播放男声或女声，无需设置
         </div>
-        <div class="form-text">对应 <code>static/audio/vowel/</code> 下 <code>*.f.wav</code> / <code>*.m.wav</code> 两套录音。</div>
+        <div class="form-text">
+          练的是两个音的差别，固定成某个人的音色容易变成记发音人，所以 <code>static/audio/vowel/</code>
+          下的 <code>*.f.*</code> / <code>*.m.*</code> 两套录音每题随机抽一条。
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary w-100 py-2">

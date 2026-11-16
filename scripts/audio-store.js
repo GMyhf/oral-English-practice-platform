@@ -143,8 +143,13 @@ const WordAudio = (() => {
 window.AudioStore = AudioStore;
 window.WordAudio = WordAudio;
 
-/** 绑定练习页底部的「音频导入」面板 */
-function bindWordAudio(getCurrentWord) {
+/** 绑定练习页底部的「音频导入」面板
+ *
+ *  options.revealWord === false 时（听读写），面板里一处都不许出现单词拼写：
+ *  答题环节本来不显示拼写，而徽章是按当前单词画的，照抄拼写就等于把答案写在屏幕下方。
+ */
+function bindWordAudio(getCurrentWord, options) {
+  const revealWord = !((options || {}).revealWord === false);
   const input = document.getElementById("audio-input");
   const inputOne = document.getElementById("audio-input-one");
   const status = document.getElementById("audio-status");
@@ -163,16 +168,18 @@ function bindWordAudio(getCurrentWord) {
     const w = getCurrentWord();
     if (!w) { badge.textContent = ""; return; }
     // 发音来源有三种，只看本地音频会把服务器的真人音频误报成「合成发音」。
+    // 听读写只报来源、不报词：来源本身才是用户要知道的信息。
+    const suffix = revealWord ? `：${w.word}` : "";
     if (w.audio_url) {
       badge.className = "badge rounded-pill text-bg-success";
-      badge.innerHTML = `<i class="bi bi-headphones me-1"></i>真人音频：${w.word}`;
+      badge.innerHTML = `<i class="bi bi-headphones me-1"></i>真人音频${suffix}`;
       return;
     }
     const local = WordAudio.has(w.word);
     badge.className = "badge rounded-pill " + (local ? "text-bg-info" : "text-bg-light text-dark border");
     badge.innerHTML = local
-      ? `<i class="bi bi-music-note-beamed me-1"></i>本地音频：${w.word}`
-      : `<i class="bi bi-megaphone me-1"></i>合成发音（未导入 ${w.word} 的音频）`;
+      ? `<i class="bi bi-music-note-beamed me-1"></i>本地音频${suffix}`
+      : `<i class="bi bi-megaphone me-1"></i>合成发音${revealWord ? `（未导入 ${w.word} 的音频）` : "（本词还没有导入音频）"}`;
   }
 
   WordAudio.paintBadge = paintBadge;
@@ -199,7 +206,7 @@ function bindWordAudio(getCurrentWord) {
       if (!w || !files.length) return;
       try {
         await WordAudio.importFiles(files.slice(0, 1), w.word);
-        paint(`已把「${files[0].name}」绑定到 ${w.word}`);
+        paint(`已把「${files[0].name}」绑定到${revealWord ? ` ${w.word}` : "当前单词"}`);
         paintBadge();
       } catch (err) {
         paint(`导入失败：${err.message}`);

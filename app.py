@@ -32,6 +32,12 @@ if not os.environ.get("SECRET_KEY"):
 
 RECORDING_EXTENSIONS = {"webm", "ogg", "wav", "mp4", "m4a", "mp3", "mpeg"}
 
+# 近似音两种题型走各自的出题函数，回包结构完全一样
+VOWEL_BUILDERS = {
+    "word": practice.build_vowel_questions,
+    "sentence": practice.build_sentence_questions,
+}
+
 # 录音文件名一律由后端生成：u<用户 id>_<12 位十六进制>.<扩展名>
 RECORDING_NAME_RE = re.compile(r"^u(\d+)_[0-9a-f]{12}\.[A-Za-z0-9]{1,8}$")
 
@@ -245,9 +251,44 @@ def practice_vowel():
         defaults={
             "count": current_user()["default_count"],
             "time_limit": current_user()["time_limit"],
-            "voice": current_user()["voice"],
+            # 没有 voice：近似音每题随机抽男声/女声，账号里的旧设置不再参与出题
         },
     )
+
+
+def rhythm_defaults():
+    """看读译 / 听读写练习页的三个时间输入框：min / max / 默认值都来自 config。
+
+    只在这里展开一份，模板负责渲染边界，tworounds.js 再按输入框的 min/max 夹一遍，
+    不会出现「页面允许 999 秒而脚本按 5 秒跑」这种两边不一致。
+    """
+    keys = {"round1": config.ROUND1_SECONDS, "round2": config.ROUND2_SECONDS,
+            "gap": config.ROUND_GAP_SECONDS}
+    return {name: {"min": lo, "max": hi, "value": default}
+            for name, (lo, hi, default) in keys.items()}
+
+
+# 会话 params 里存的是毫秒（JS 那边只用毫秒），结果页要换回人能读的秒
+RHYTHM_LABELS = {
+    "round1_ms": "第一轮（秒）",
+    "round2_ms": "第二轮（秒）",
+    "round_gap_ms": "题间停顿（秒）",
+}
+
+
+def humanize_params(params):
+    """把 round1_ms=1000 这类内部字段渲染成「第一轮（秒）= 1」。"""
+    out = {}
+    for key, value in params.items():
+        label = RHYTHM_LABELS.get(key)
+        if label is None:
+            out[key] = value
+            continue
+        try:
+            out[label] = f"{round(float(value) / 1000, 2):g}"
+        except (TypeError, ValueError):
+            out[label] = value      # 老数据里万一存了字符串，原样显示而不是报错
+    return out
 
 
 @app.route("/practice/read-translate")
@@ -256,6 +297,7 @@ def practice_read_translate():
     return render_template(
         "practice_read_translate.html",
         defaults={"count": current_user()["default_count"]},
+        rhythm=rhythm_defaults(),
     )
 
 
@@ -265,6 +307,7 @@ def practice_listen_spell():
     return render_template(
         "practice_listen_spell.html",
         defaults={"count": current_user()["default_count"]},
+        rhythm=rhythm_defaults(),
     )
 
 
@@ -359,7 +402,8 @@ def result_page(session_id):
         params = {}
     if not isinstance(params, dict):
         params = {}     # 早期脏数据里 params 可能是字符串，避免结果页整页 500
-    return render_template("result.html", session_row=dict(row), params=params, items=items)
+    return render_template("result.html", session_row=dict(row),
+                           params=humanize_params(params), items=items)
 
 
 # ---------------------------------------------------------------- 接口
@@ -369,14 +413,16 @@ def result_page(session_id):
 def api_vowel_questions():
     data = json_body()
     mode = data.get("mode", "word")
-    if not practice.VOWEL_MODES.get(mode):
-        return jsonify({"error": "句子练习的音频题库还没上线，请先选单词练习"}), 400
+    builder = VOWEL_BUILDERS.get(mode)
+    if builder is None:
+        return jsonify({"error": "未知的练习类型，请选单词练习或句子练习"}), 400
     try:
         requested = as_count(data.get("count", MISSING), 10)
-        questions = practice.build_vowel_questions(
+        questions = builder(
             data.get("group_key", ""),
             requested,
-            data.get("voice", "f"),
+            # 不再按账号设置固定性别：默认随机，只有显式传 f/m 才锁定
+            data.get("voice", practice.DEFAULT_VOWEL_VOICE),
         )
     except (ValueError, TypeError) as exc:
         return jsonify({"error": str(exc)}), 400
@@ -386,6 +432,7 @@ def api_vowel_questions():
         q.pop("audio", None)
     return jsonify({
         "questions": questions,
+        "mode": mode,
         "time_limit": current_user()["time_limit"],
         "requested": requested,
         "actual": len(questions),

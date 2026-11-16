@@ -2,11 +2,15 @@
    两个页面共用本脚本，靠 <body> 上的 data-practice-type 区分行为：
 
    read-translate（看读译）
-     第一轮：屏幕展示单词 1 秒，同时录音用户朗读
-     第二轮：屏幕展示单词 5 秒，键入中文译文（任一项即可）
+     第一轮：屏幕展示单词，同时录音用户朗读
+     第二轮：屏幕展示单词，键入中文译文（任一项即可）
    listen-spell（听读写）
-     第一轮：播放单词音频后空出 1 秒录音跟读（不显示拼写）
-     第二轮：再播一次音频后空出 5 秒，键入正确拼写
+     第一轮：播放单词音频后录音跟读（不显示拼写）
+     第二轮：再播一次音频，限时内键入正确拼写
+
+   三段时长——第一轮、第二轮、题目之间的停顿——都从练习设置里的输入框读，
+   默认值和 min/max 由 config.py 经 app.py 渲染进输入框，这里只负责按边界夹一遍；
+   点「开始练习」时读一次并写进会话 params，中途改框不影响正在跑的这轮。
 
    结束后把所有作答一次性提交 /api/practice/finish，跳转结果页逐题回看。 */
 (() => {
@@ -18,29 +22,33 @@
 
   const CFG = {
     "read-translate": {
-      round1Ms: 1000,
-      round2Ms: 5000,
       showWordRound1: true,
       showWordRound2: true,
       playAudioRound1: false,
       playAudioRound2: false,
       inputPlaceholder: "输入这个单词的中文译文（任写一项）",
       emptyAnswer: "无回答",
+      roundNote: seconds => `展示 ${seconds} 秒，超时未提交记为无回答`,
       judge: judgeChinese
     },
     "listen-spell": {
-      round1Ms: 1000,
-      round2Ms: 5000,
       showWordRound1: false,
       showWordRound2: false,
       playAudioRound1: true,
       playAudioRound2: true,
       inputPlaceholder: "输入你听到的单词拼写",
       emptyAnswer: "无回答",
+      roundNote: seconds => `播放后 ${seconds} 秒内提交，超时记为无回答`,
       judge: (word, answer) => answer.trim().toLowerCase() === word.word.toLowerCase()
     }
   };
   const cfg = CFG[practiceType];
+
+  // 输入框不在的时候（比如别处复用这段脚本）退回以前写死的那三个值
+  const FALLBACK_SECONDS = { round1_seconds: 1, round2_seconds: 5, round_gap: 0.2 };
+  let round1Ms = 1000;
+  let round2Ms = 5000;
+  let gapMs = 200;
 
   let sessionId = null;
   let words = [];
@@ -51,15 +59,44 @@
   let micBroken = false;
   let currentWord = null;
 
+  /** 读一个秒数输入框：清空或写非数字都用默认值兜底，出格的值夹到 min/max。 */
+  function readSeconds(id) {
+    const el = $(id);
+    if (!el) return FALLBACK_SECONDS[id];
+    const raw = String(el.value).trim();
+    const parsed = Number(raw);
+    let seconds = raw === "" || !Number.isFinite(parsed) ? Number(el.getAttribute("value")) : parsed;
+    if (!Number.isFinite(seconds)) seconds = FALLBACK_SECONDS[id];
+    const lo = Number(el.min), hi = Number(el.max);
+    if (Number.isFinite(lo)) seconds = Math.max(lo, seconds);
+    if (Number.isFinite(hi)) seconds = Math.min(hi, seconds);
+    return seconds;
+  }
+
   // ---------------------------------------------------------------- 开始
 
   $("btn-start").addEventListener("click", async () => {
     const count = Number($("count").value) || 20;
+    const seconds = {
+      round1: readSeconds("round1_seconds"),
+      round2: readSeconds("round2_seconds"),
+      gap: readSeconds("round_gap")
+    };
+    round1Ms = Math.round(seconds.round1 * 1000);
+    round2Ms = Math.round(seconds.round2 * 1000);
+    gapMs = Math.round(seconds.gap * 1000);
+    const note = $("round2-note");
+    if (note && cfg.roundNote) note.textContent = cfg.roundNote(seconds.round2);
     $("btn-start").disabled = true;
     try {
       const sess = await Common.api("/api/practice/session", {
         practice_type: practiceType,
-        params: { count, round1_ms: cfg.round1Ms, round2_ms: cfg.round2Ms }
+        params: {
+          count,
+          round1_ms: round1Ms,
+          round2_ms: round2Ms,
+          round_gap_ms: gapMs
+        }
       });
       sessionId = sess.session_id;
 
@@ -92,7 +129,7 @@
   // ---------------------------------------------------------------- 第一轮：录音
 
   async function runRound1() {
-    setStageTitle(`第一轮 · 朗读（共 ${words.length} 个词）`);
+    setStageTitle(`第一轮 · 朗读（每词 ${round1Ms / 1000} 秒，共 ${words.length} 个词）`);
     setPane("round1");
     // 第一轮不显示作答框，先把它们置为不可用，避免"看不见但仍可输入"的状态
     $("answer-input").disabled = true;
@@ -106,7 +143,7 @@
 
       if (cfg.playAudioRound1) await playStandard(word);
 
-      const blobInfo = await recordFor(cfg.round1Ms);
+      const blobInfo = await recordFor(round1Ms);
       if (blobInfo) {
         try {
           const saved = await uploadRecording(blobInfo.blob, blobInfo.ext, {
@@ -117,7 +154,7 @@
           /* 录音上传失败不影响判分，结果页会显示「没有录到音」 */
         }
       }
-      await Common.wait(120);
+      await Common.wait(gapMs);
     }
     await runRound2();
   }
@@ -154,7 +191,7 @@
   // ---------------------------------------------------------------- 第二轮：作答
 
   async function runRound2() {
-    setStageTitle(`第二轮 · 作答（共 ${words.length} 个词）`);
+    setStageTitle(`第二轮 · 作答（每题 ${round2Ms / 1000} 秒，共 ${words.length} 个词）`);
     setPane("round2");
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
@@ -182,12 +219,12 @@
       if (cfg.playAudioRound2) await playStandard(word);
 
       const bar = $("round2-timer");
-      timer = Common.startCountdown(cfg.round2Ms / 1000, left => {
-        const ratio = Math.max(0, Math.min(1, left / (cfg.round2Ms / 1000)));
+      timer = Common.startCountdown(round2Ms / 1000, left => {
+        const ratio = Math.max(0, Math.min(1, left / (round2Ms / 1000)));
         bar.style.width = `${ratio * 100}%`;
         bar.classList.toggle("urgent", ratio < 0.3);
       });
-      if (done) timer.stop(true);   // 用户在播放音频期间就已提交，不再等满 5 秒
+      if (done) timer.stop(true);   // 用户在播放音频期间就已提交，不再等满整段限时
       await timer.promise;
 
       const answer = (submitted === null ? "" : submitted).trim();
@@ -217,7 +254,7 @@
       $("answer-input").onkeydown = null;
       $("answer-input").disabled = true;
       $("answer-submit").disabled = true;
-      await Common.wait(250);
+      await Common.wait(gapMs);
     }
     await finish();
   }
@@ -318,9 +355,10 @@
     }
   }
 
-  // 音频导入面板：词库单词默认没有真人音频，可以在这里导入自己的录音
+  // 音频导入面板：词库单词默认没有真人音频，可以在这里导入自己的录音。
+  // 听读写不能把单词拼写画进面板（面板挂在题目下方，写了就等于泄答案），看读译不受影响。
   if (window.WordAudio && $("audio-input")) {
-    bindWordAudio(() => currentWord);
+    bindWordAudio(() => currentWord, { revealWord: practiceType !== "listen-spell" });
     Common.getJson("/api/words/all")
       .then(data => WordAudio.setWordList(data.words))
       .catch(() => {});

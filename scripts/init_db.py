@@ -5,6 +5,7 @@
     python scripts/init_db.py            # 幂等，重复执行不会重复插入
     python scripts/init_db.py --reset    # 先删掉已有表再重建
 """
+import json
 import os
 import re
 import sqlite3
@@ -17,7 +18,10 @@ if hasattr(sys.stdout, "reconfigure"):
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "app.db")
 VOWEL_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "vowel")
+SENTENCE_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "sentence")
 WORD_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "word")
+# 整句文本：由 scripts/import_audio_package.py 转写 4A 后写出，这里只负责登记进库
+SENTENCE_TEXTS = os.path.join(BASE_DIR, "scripts", "sentence_texts.json")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -60,6 +64,21 @@ CREATE TABLE IF NOT EXISTS vowel_items (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_vowel_item ON vowel_items(group_id, item_no, option_no);
 
+-- 句子近似音（教材 4A）：同一组对立对换成整句朗读，屏幕上只给出句中变化的那两个词。
+-- 整句文本由语音识别转写后存在 scripts/sentence_texts.json，这里登记进 sentence 字段。
+-- 音频允许只有一种性别（4A 的 q / s 两个发音人不保证每课都齐），所以 audio_f / audio_m 可空。
+CREATE TABLE IF NOT EXISTS sentence_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id   INTEGER NOT NULL REFERENCES vowel_groups(id) ON DELETE CASCADE,
+    item_no    INTEGER NOT NULL,
+    option_no  INTEGER NOT NULL,
+    word       TEXT    NOT NULL,
+    sentence   TEXT    NOT NULL,
+    audio_f    TEXT,
+    audio_m    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sentence_item ON sentence_items(group_id, item_no, option_no);
+
 CREATE TABLE IF NOT EXISTS practice_sessions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id       INTEGER NOT NULL REFERENCES users(id),
@@ -87,6 +106,7 @@ CREATE TABLE IF NOT EXISTS practice_records (
 DROP = """
 DROP TABLE IF EXISTS practice_records;
 DROP TABLE IF EXISTS practice_sessions;
+DROP TABLE IF EXISTS sentence_items;
 DROP TABLE IF EXISTS vowel_items;
 DROP TABLE IF EXISTS vowel_groups;
 DROP TABLE IF EXISTS words;
@@ -510,6 +530,82 @@ def scan_vowel_audio(conn):
     return group_count
 
 
+def load_sentence_texts():
+    """读 scripts/sentence_texts.json：{组名: {"对立对.选项": 整句}}。"""
+    if not os.path.isfile(SENTENCE_TEXTS):
+        return {}
+    with open(SENTENCE_TEXTS, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def scan_sentence_audio(conn):
+    """扫描 static/audio/sentence，把 4A 的句子音频登记进 sentence_items。
+
+    文件名沿用 3B 的规则（<对立对>.<选项>-<词>.<f|m>.mp3），所以每个 (对立对, 选项)
+    必须能在 vowel_items 里找到对应的单词——句子练的就是那对词。整句文本从
+    scripts/sentence_texts.json 取，取不到的不入库（结果页会显示空句，不如没有）。
+    """
+    if not os.path.isdir(SENTENCE_AUDIO_DIR):
+        return 0, 0
+
+    texts = load_sentence_texts()
+    registered = missing_text = orphan = 0
+    for group_key in sorted(os.listdir(SENTENCE_AUDIO_DIR)):
+        subdir = os.path.join(SENTENCE_AUDIO_DIR, group_key)
+        if not os.path.isdir(subdir):
+            continue
+        group_id = conn.execute(
+            "SELECT id FROM vowel_groups WHERE group_key=?", (group_key,)
+        ).fetchone()
+        if not group_id:
+            print(f"  句子目录 {group_key} 在近似音组里找不到，先跑 3B 的导入")
+            orphan += 1
+            continue
+        gid = group_id["id"]
+        group_texts = texts.get(group_key, {})
+        # 整组先清空再按磁盘上的文件重建：删掉的音频不会在库里留下僵尸行
+        conn.execute("DELETE FROM sentence_items WHERE group_id=?", (gid,))
+
+        items = {}
+        for fname in sorted(os.listdir(subdir)):
+            match = AUDIO_NAME_RE.match(fname)
+            if not match:
+                print("  跳过无法解析的句子文件名：", group_key, "/", fname)
+                continue
+            item_no, option_no, word, voice = (
+                int(match.group(1)), int(match.group(2)), match.group(3), match.group(4))
+            key = (item_no, option_no)
+            row = items.setdefault(key, {"word": word, "f": None, "m": None})
+            row[voice] = f"static/audio/sentence/{group_key}/{fname}"
+
+        for (item_no, option_no), row in sorted(items.items()):
+            sentence = group_texts.get(f"{item_no}.{option_no}")
+            word_row = conn.execute(
+                "SELECT word FROM vowel_items WHERE group_id=? AND item_no=? AND option_no=?",
+                (gid, item_no, option_no)).fetchone()
+            if not sentence or not word_row:
+                print(f"  {group_key} 第{item_no}组选项{option_no} 缺少"
+                      f"{'整句文本' if not sentence else '对应的单词题'}，跳过")
+                missing_text += 1
+                continue
+            if word_row["word"].lower() != row["word"].lower():
+                print(f"  {group_key} 第{item_no}组选项{option_no} 文件名里的词 {row['word']} "
+                      f"和单词题库 {word_row['word']} 不一致，跳过")
+                orphan += 1
+                continue
+            conn.execute(
+                "INSERT INTO sentence_items(group_id, item_no, option_no, word, sentence, "
+                "audio_f, audio_m) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(group_id, item_no, option_no) DO UPDATE SET "
+                "word=excluded.word, sentence=excluded.sentence, "
+                "audio_f=excluded.audio_f, audio_m=excluded.audio_m",
+                (gid, item_no, option_no, word_row["word"], sentence, row["f"], row["m"]),
+            )
+            registered += 1
+
+    return registered, missing_text
+
+
 def seed_words(conn):
     seed = SEED_WORDS + SEED_WORDS_TEXTBOOK
     for word, phonetic, cn, example in seed:
@@ -567,6 +663,7 @@ def init_db(reset=False):
 
     words = seed_words(conn)
     scan_vowel_audio(conn)
+    sentence_items, sentence_missing = scan_sentence_audio(conn)
     audio_words, orphans = scan_word_audio(conn)
     conn.commit()
 
@@ -579,13 +676,20 @@ def init_db(reset=False):
 
     total_groups = conn.execute("SELECT COUNT(*) AS c FROM vowel_groups").fetchone()["c"]
     total_items = conn.execute("SELECT COUNT(*) AS c FROM vowel_items").fetchone()["c"]
+    total_sentences = conn.execute("SELECT COUNT(*) AS c FROM sentence_items").fetchone()["c"]
+    sentence_groups = conn.execute(
+        "SELECT COUNT(DISTINCT group_id) AS c FROM sentence_items").fetchone()["c"]
     print(
-        "数据库初始化完成 → {path}\n  单词 {w} 条（真人音频 {wa} 条），近似音组 {g} 组，最小对立音频 {i} 条".format(
+        "数据库初始化完成 → {path}\n  单词 {w} 条（真人音频 {wa} 条），近似音组 {g} 组，"
+        "最小对立音频 {i} 条\n  句子近似音 {s} 条（覆盖 {sg} 组，缺文本跳过 {sm} 条）".format(
             path=os.path.relpath(DB_PATH, BASE_DIR),
             w=words,
             wa=audio_words,
             g=total_groups,
             i=total_items,
+            s=total_sentences,
+            sg=sentence_groups,
+            sm=sentence_missing,
         )
     )
     conn.close()

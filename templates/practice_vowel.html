@@ -4,7 +4,7 @@
 {% block content %}
 <div class="hero">
   <h1>近似音区分</h1>
-  <p class="mb-0 opacity-75">听音频，判断刚才读的是屏幕上编号 1 还是 2 的单词</p>
+  <p class="mb-0 opacity-75">听音频，判断刚才读的是屏幕上编号 1 还是 2 的那个词</p>
 </div>
 
 <!-- 1. 设置 -->
@@ -17,8 +17,10 @@
         <select class="form-select" id="group_key">
           {% for g in vowel_groups %}
           <option value="{{ g.group_key }}"
+                  data-word-pairs="{{ g.pair_count }}"
+                  data-sentence-pairs="{{ g.sentence_pair_count }}"
                   {{ 'selected' if request.args.get('group') == g.group_key }}>
-            {{ g.group_key }} — {{ g.label }}（{{ g.pair_count }} 组对立对）
+            {{ g.group_key }} — {{ g.label }}（{{ g.pair_count }} 组对立对{% if g.sentence_pair_count %}，句子 {{ g.sentence_pair_count }} 组{% endif %}）
           </option>
           {% endfor %}
         </select>
@@ -41,22 +43,17 @@
           <label class="btn btn-outline-warning" for="mode_word">单词练习</label>
           <input type="radio" class="btn-check" name="mode" id="mode_sentence" value="sentence"
                  {{ 'disabled' if not modes.sentence }}>
-          <label class="btn btn-outline-warning text-muted" for="mode_sentence">句子练习</label>
+          <label class="btn btn-outline-warning" for="mode_sentence">句子练习</label>
         </div>
-        {% if not modes.sentence %}
-        <div class="form-text">句子音频题库尚未上线，暂时只能选单词练习。</div>
-        {% endif %}
+        <div class="form-text" id="mode-hint">
+          句子练习放的是含该词的整句，屏幕上仍然只给句中变化的那两个词。
+        </div>
       </div>
 
       <div class="col-md-6">
         <label class="form-label">音频性别</label>
-        <div class="btn-group d-flex" role="group">
-          <input type="radio" class="btn-check" name="voice" id="voice_f" value="f"
-                 {{ 'checked' if defaults.voice != 'm' }}>
-          <label class="btn btn-outline-warning" for="voice_f">女声</label>
-          <input type="radio" class="btn-check" name="voice" id="voice_m" value="m"
-                 {{ 'checked' if defaults.voice == 'm' }}>
-          <label class="btn btn-outline-warning" for="voice_m">男声</label>
+        <div class="form-control-plaintext text-muted">
+          <i class="bi bi-shuffle me-1"></i>每题随机播放男声或女声，不用选
         </div>
       </div>
     </div>
