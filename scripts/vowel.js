@@ -55,8 +55,15 @@
     if (e.key === "1" || e.key === "2") {
       e.preventDefault();
       picked = Number(e.key);
-      if (timer) timer.stop(true);   // 已作答，提前结束倒计时
+      if (timer) timer.stop(true);   // 倒计时已开始则立刻结束；还在播音频时先记下选择
     }
+  }
+
+  function resetTimerUi() {
+    const fill = $("timer-fill");
+    fill.style.width = "100%";
+    fill.classList.remove("urgent");
+    $("timer-text").textContent = "播放音频中…";
   }
 
   function renderOptions(question) {
@@ -73,16 +80,29 @@
     const question = questions[cursor];
     picked = null;
     answered = false;
+    timer = null;
 
     $("progress").textContent = `第 ${cursor + 1} / ${questions.length} 题`;
     $("score").textContent = `对 ${stats.right} · 错 ${stats.wrong}`;
     $("feedback").innerHTML = "";
     renderOptions(question);
     $("hint").innerHTML = '正在播放音频…请按键盘 <kbd>1</kbd> 或 <kbd>2</kbd> 作答';
+    resetTimerUi();
 
-    Common.playUrl(question.audio_url).catch(() => {
+    // 先播完音频再开始限时：单词录音普遍 1.0~1.4 秒，
+    // 和倒计时同时起跑的话默认 1 秒限时会在听完之前判成「无回答」。
+    try {
+      await Common.playUrl(question.audio_url);
+    } catch (err) {
       $("hint").textContent = "音频播放失败，可直接按 1 / 2 猜测";
-    });
+    }
+
+    // 播放期间就已经按下编号（听得快），判完立刻进入下一题
+    if (picked !== null) {
+      answered = true;
+      grade(question, picked);
+      return;
+    }
 
     timer = Common.startCountdown(timeLimit, left => {
       const ratio = Math.max(0, Math.min(1, left / timeLimit));
@@ -92,6 +112,7 @@
     });
 
     const timedOut = !(await timer.promise);
+    if (answered) return;      // 避免与提前作答重复判分
     answered = true;
     grade(question, timedOut ? null : picked);
   }

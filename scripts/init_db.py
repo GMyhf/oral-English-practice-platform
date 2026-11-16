@@ -17,6 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "app.db")
 VOWEL_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "vowel")
+WORD_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "word")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -92,16 +93,51 @@ DROP TABLE IF EXISTS words;
 DROP TABLE IF EXISTS users;
 """
 
-# 近似音组目录名 → 音标对照说明
+# 近似音组目录名 → 音标对照说明。
+# 目录来自教材配套录音的 3B（单词最小对立对），组名取该组一对代表词，
+# 具体音频由 scripts/import_audio_package.py 复制，这里只负责显示说明。
 VOWEL_GROUP_LABELS = {
-    "see-say":     ("/iː/ 与 /eɪ/", "长元音 /iː/ 与双元音 /eɪ/ 的对立，如 see / say"),
-    "sheep-ship":  ("/iː/ 与 /ɪ/",  "长元音 /iː/ 与短元音 /ɪ/ 的对立，如 sheep / ship"),
-    "big-beg":     ("/ɪ/ 与 /e/",   "短元音 /ɪ/ 与 /e/ 的对立，如 big / beg"),
-    "pull-pool":   ("/ʊ/ 与 /uː/",  "短元音 /ʊ/ 与长元音 /uː/ 的对立，如 pull / pool"),
+    # 原有 4 组
+    "see-say":     ("/iː/ 与 /eɪ/", "长元音 /iː/ 与双元音 /eɪ/ 的对立，如 see / say（教材第 1 课）"),
+    "sheep-ship":  ("/iː/ 与 /ɪ/",  "长元音 /iː/ 与短元音 /ɪ/ 的对立，如 sheep / ship（教材第 2 课）"),
+    "big-beg":     ("/ɪ/ 与 /e/",   "短元音 /ɪ/ 与 /e/ 的对立，如 big / beg（教材第 3 课）"),
+    "pull-pool":   ("/ʊ/ 与 /uː/",  "短元音 /ʊ/ 与长元音 /uː/ 的对立，如 pull / pool（教材第 12 课）"),
+    # 元音对立
+    "pan-pen":     ("/æ/ 与 /e/",   "梅花音 /æ/ 与 /e/ 的对立，如 pan / pen、had / head（教材第 4 课）"),
+    "cub-curb":    ("/ʌ/ 与 /ɜːr/", "短元音 /ʌ/ 与卷舌 /ɜːr/ 的对立，如 cub / curb、bud / bird（教材第 8 课）"),
+    "fond-fund":   ("/ɒ/ 与 /ʌ/",   "圆唇 /ɒ/（美式读 /ɑː/）与 /ʌ/ 的对立，如 fond / fund、cop / cup（教材第 9 课）"),
+    "boss-bus":    ("/ɒ/ 与 /ʌ/",   "同上组的另一组练习词，含 caught / cut 这类特殊拼读（教材第 10 课 a）"),
+    "burn-barn":   ("/ɜːr/ 与 /ɑːr/", "卷舌 /ɜːr/ 与 /ɑːr/ 的对立，如 burn / barn、fur / far（教材第 10 课 c）"),
+    "full-fall":   ("/ʊ/ 与 /ɔː/",  "短元音 /ʊ/ 与长元音 /ɔː/ 的对立，如 full / fall、took / talk（教材第 11 课）"),
+    "pain-pen":    ("/eɪ/ 与 /e/",  "双元音 /eɪ/ 与单元音 /e/ 的对立，如 pain / pen、date / debt（教材第 13 课）"),
+    "foal-fall":   ("/oʊ/ 与 /ɔː/", "双元音 /oʊ/ 与长元音 /ɔː/ 的对立，如 foal / fall、sew / saw（教材第 14 课）"),
+    "kite-cat":    ("/aɪ/ 与 /æ/",  "双元音 /aɪ/ 与梅花音 /æ/ 的对立，如 kite / cat、hide / had（教材第 15 课）"),
+    "boil-bawl":   ("/ɔɪ/ 与 /ɔː/", "双元音 /ɔɪ/ 与长元音 /ɔː/ 的对立，如 boil / bawl、poise / pause（教材第 16 课）"),
+    "pound-pond":  ("/aʊ/ 与 /ɒ/",  "双元音 /aʊ/ 与短元音 /ɒ/ 的对立，如 pound / pond、down / Don（教材第 17 课）"),
+    # 辅音与音素有无的对立
+    "woos-ooze":   ("/w/ /j/ 与 无辅音", "词首半元音 /w/ /j/ 是否发音的对立，如 woos / ooze、year / ear（教材第 19 课）"),
+    "row-low":     ("/r/ 与 /l/",   "舌侧音 /l/ 与 /r/ 的对立，如 row / low、read / lead（教材第 20 课）"),
+    "world-word":  ("/l/ 与 无 /l/", "词尾 /l/ 是否发音的对立，如 world / word、cold / code、silk / sick（教材第 21 课）"),
+    "no-low":      ("/n/ 与 /l/",   "鼻音 /n/ 与舌侧音 /l/ 的对立，如 no / low、need / lead（教材第 22 课）"),
+    "comb-cone":   ("/m/ 与 /n/",   "词尾鼻音 /m/ 与 /n/ 的对立，如 comb / cone、gum / gun（教材第 23 课）"),
+    "sing-sin":    ("/ŋ/ 与 /n/",   "舌后鼻音 /ŋ/ 与舌尖鼻音 /n/ 的对立，如 sing / sin、thing / thin（教材第 24 课）"),
+    "heat-eat":    ("/h/ 与 无 /h/", "词首气流音 /h/ 是否发音的对立，如 heat / eat、hair / air（教材第 25 课）"),
+    "feel-veal":   ("/f/ 与 /v/",   "清唇齿擦音 /f/ 与浊音 /v/ 的对立，如 feel / veal、fan / van（教材第 27 课）"),
+    "seal-zeal":   ("/s/ 与 /z/",   "清擦音 /s/ 与浊擦音 /z/ 的对立，如 seal / zeal、race / raise（教材第 29 课）"),
+    "fin-thin":    ("/f/ 与 /θ/",   "唇齿音 /f/ 与咬舌 /θ/ 的对立，如 fin / thin、free / three（教材第 30 课）"),
+    "teethe-tease": ("/ð/ 与 /z/",  "咬舌浊音 /ð/ 与 /z/ 的对立，如 teethe / tease、scythe / size（教材第 31 课）"),
+    "shave-save":  ("/ʃ/ 与 /s/",   "翘舌清擦音 /ʃ/ 与 /s/ 的对立，如 shave / save、sheet / seat（教材第 32 课）"),
+    "pin-bin":     ("/p/ 与 /b/",   "清塞音 /p/ 与浊塞音 /b/ 的对立，如 pin / bin、cup / cub（教材第 35 课）"),
+    "tin-din":     ("/t/ 与 /d/",   "清塞音 /t/ 与浊塞音 /d/ 的对立，如 tin / din、seat / seed（教材第 37 课）"),
+    "cap-gap":     ("/k/ 与 /ɡ/",   "清塞音 /k/ 与浊塞音 /ɡ/ 的对立，如 cap / gap、coat / goat（教材第 39 课）"),
+    "cheer-jeer":  ("/tʃ/ 与 /dʒ/", "破擦音 /tʃ/ 与 /dʒ/ 的对立，如 cheer / jeer、batch / badge（教材第 41 课）"),
 }
 
-# 音频文件名：n.m-word.f.wav / n.m-word.m.wav
-AUDIO_NAME_RE = re.compile(r"^(\d+)\.(\d+)-(.+)\.([fm])\.wav$")
+# 音频文件名：n.m-word.f.wav / n.m-word.m.wav（第 22 课是 mp3，两种都要认）
+AUDIO_NAME_RE = re.compile(r"^(\d+)\.(\d+)-(.+?)\.([fm])\.(wav|mp3)$", re.IGNORECASE)
+
+# 单词音频文件名：<word>.wav / <word>.mp3，专有名词保留首字母大写（Paul、Tuesday）
+WORD_AUDIO_NAME_RE = re.compile(r"^([A-Za-z][A-Za-z'\-]*?)\.(wav|mp3)$", re.IGNORECASE)
 
 SEED_WORDS = [
     ("abandon", "/əˈbændən/", "放弃；抛弃", "He abandoned his car in the snow."),
@@ -136,6 +172,287 @@ SEED_WORDS = [
     ("constant", "/ˈkɑːnstənt/", "持续的；恒定的", "The machine needs constant attention."),
 ]
 
+# 教材配套录音各课 3A 的单词（真人音频放在 static/audio/word/，由 scan_word_audio 登记）。
+# 单字母（R、Z、C、H）和不是单词的文件名（theam、tode）已经排除，不进词库。
+SEED_WORDS_TEXTBOOK = [
+    ("age", "/eɪdʒ/", "年龄；时期", "He started school at the age of five."),
+    ("ash", "/æʃ/", "灰；灰烬", "The fire turned the paper into ash."),
+    ("attempt", "/əˈtempt/", "尝试；努力", "She attempted to climb the wall."),
+    ("back", "/bæk/", "背；后面；回来", "He leaned back in the chair."),
+    ("badge", "/bædʒ/", "徽章；标记", "He wore a name badge at the meeting."),
+    ("bag", "/bæɡ/", "包；袋子", "My bag is full of books."),
+    ("ball", "/bɔːl/", "球；舞会", "The kids played ball in the park."),
+    ("ban", "/bæn/", "禁止；禁令", "The city will ban cars in the center."),
+    ("bang", "/bæŋ/", "砰地关上；巨响", "He banged the door shut."),
+    ("bank", "/bæŋk/", "银行；河岸", "She works at a bank downtown."),
+    ("barn", "/bɑːrn/", "谷仓；牲口棚", "The cows stayed in the barn."),
+    ("bat", "/bæt/", "球棒；蝙蝠", "He swung the bat but missed."),
+    ("beg", "/beɡ/", "乞求；恳求", "I beg your pardon."),
+    ("bell", "/bel/", "铃；钟", "The bell rang at noon."),
+    ("big", "/bɪɡ/", "大的", "They live in a big house."),
+    ("bike", "/baɪk/", "自行车", "I ride my bike to school."),
+    ("bill", "/bɪl/", "账单；纸币", "The hotel bill was very high."),
+    ("bin", "/bɪn/", "垃圾箱；箱子", "Throw the box in the bin."),
+    ("boil", "/bɔɪl/", "煮沸；沸腾", "Wait until the water boils."),
+    ("bore", "/bɔːr/", "使厌烦；钻孔", "The long trip bored the children."),
+    ("born", "/bɔːrn/", "出生的；天生的", "She was born in 2001."),
+    ("borough", "/ˈbʌroʊ/", "行政区；自治市", "The borough has its own council."),
+    ("boss", "/bɔːs/", "老板；上司", "My boss is on holiday this week."),
+    ("bow", "/boʊ/", "弓；蝴蝶结（鞠躬读 /baʊ/）", "He shot an arrow with a bow."),
+    ("bowl", "/boʊl/", "碗；钵", "Fill the dog's bowl with water."),
+    ("breathe", "/briːð/", "呼吸", "Breathe slowly and relax."),
+    ("breeze", "/briːz/", "微风", "A cool breeze blew through the window."),
+    ("bud", "/bʌd/", "芽；花苞", "The rose bud opened in the sun."),
+    ("bug", "/bʌɡ/", "虫子；故障", "A bug got into the tent at night."),
+    ("bull", "/bʊl/", "公牛", "The bull ran across the field."),
+    ("burrow", "/ˈbɜːroʊ/", "地洞；挖洞", "The rabbit dug a deep burrow."),
+    ("bus", "/bʌs/", "公共汽车", "I take the bus to work every day."),
+    ("call", "/kɔːl/", "打电话；呼叫", "Call me after dinner."),
+    ("card", "/kɑːrd/", "卡片；纸牌", "She sent me a birthday card."),
+    ("cat", "/kæt/", "猫", "The cat slept on the sofa."),
+    ("caught", "/kɔːt/", "抓住（catch 的过去式）", "He caught the ball with one hand."),
+    ("close", "/kloʊz/", "关闭；结束", "Please close the window."),
+    ("clothe", "/kloʊð/", "给…穿衣；覆盖", "She clothed the baby warmly."),
+    ("code", "/koʊd/", "代码；密码", "Enter your access code here."),
+    ("coil", "/kɔɪl/", "线圈；盘绕", "Wind the wire into a tight coil."),
+    ("cold", "/koʊld/", "寒冷的；感冒", "It is very cold outside."),
+    ("colonel", "/ˈkɜːrnl/", "上校", "The colonel gave the order."),
+    ("comb", "/koʊm/", "梳子；梳理", "He ran a comb through his hair."),
+    ("cone", "/koʊn/", "圆锥体；蛋筒", "The kids ate ice cream from a cone."),
+    ("cooed", "/kuːd/", "咕咕叫（coo 的过去式）", "The pigeon cooed softly."),
+    ("cop", "/kɑːp/", "警察（口语）", "The cop stopped the speeding car."),
+    ("cord", "/kɔːrd/", "绳子；电线", "Pull the cord to turn it on."),
+    ("cot", "/kɑːt/", "婴儿床；简易床", "The baby slept in a wooden cot."),
+    ("could", "/kʊd/", "能够（can 的过去式）", "We could hear the music next door."),
+    ("courage", "/ˈkɜːrɪdʒ/", "勇气；胆量", "It took courage to speak in public."),
+    ("cub", "/kʌb/", "幼兽；小熊", "A lion cub played with its tail."),
+    ("cup", "/kʌp/", "杯子；奖杯", "Drink a cup of warm water."),
+    ("current", "/ˈkɜːrənt/", "当前的；水流", "The current flows south in winter."),
+    ("cut", "/kʌt/", "切；割", "He cut the paper with scissors."),
+    ("dent", "/dent/", "凹痕；损伤", "There is a dent in the car door."),
+    ("dime", "/daɪm/", "一角硬币", "A dime is worth ten cents."),
+    ("din", "/dɪn/", "嘈杂声；喧闹", "There was a loud din in the hall."),
+    ("dock", "/dɑːk/", "码头；入库", "The ship arrived at the dock."),
+    ("dog", "/dɔːɡ/", "狗", "The dog barked all night."),
+    ("Don", "/dɑːn/", "唐（男名）", "Don is my next-door neighbour."),
+    ("down", "/daʊn/", "向下；下降", "He sat down slowly."),
+    ("duck", "/dʌk/", "鸭子；躲避", "A duck swam across the pond."),
+    ("due", "/duː/", "到期的；应有的", "The book is due next Monday."),
+    ("dug", "/dʌɡ/", "挖（dig 的过去式）", "The dog dug a hole in the yard."),
+    ("empty", "/ˈempti/", "空的；倒空", "The room was empty at midnight."),
+    ("example", "/ɪɡˈzæmpl/", "例子；榜样", "Let me give you a simple example."),
+    ("fail", "/feɪl/", "失败；不及格", "He failed the driving test."),
+    ("fall", "/fɔːl/", "落下；秋天", "Leaves fall in autumn."),
+    ("far", "/fɑːr/", "远的；遥远地", "The station is not far from here."),
+    ("feel", "/fiːl/", "感觉；觉得", "I feel much better today."),
+    ("few", "/fjuː/", "很少的；几乎没有", "Only a few people came to the talk."),
+    ("field", "/fiːld/", "田地；领域", "They walked across the open field."),
+    ("file", "/faɪl/", "文件；档案", "Save the file on the desktop."),
+    ("fire", "/ˈfaɪər/", "火；解雇", "The fire spread quickly in the wind."),
+    ("foal", "/foʊl/", "小马驹", "The foal followed its mother."),
+    ("foe", "/foʊ/", "敌人；反对者", "He defeated an old foe."),
+    ("fond", "/fɑːnd/", "喜爱的；溺爱的", "She is fond of classical music."),
+    ("fool", "/fuːl/", "傻瓜；愚弄", "Don't be a fool."),
+    ("found", "/faʊnd/", "建立；创办（find 的过去式为 found）", "She decided to found a chess club."),
+    ("four", "/fɔːr/", "四", "A table has four legs."),
+    ("full", "/fʊl/", "满的；完全的", "The glass is full of juice."),
+    ("fund", "/fʌnd/", "基金；资助", "They set up a scholarship fund."),
+    ("gap", "/ɡæp/", "缺口；差距", "There is a gap in the wall."),
+    ("goat", "/ɡoʊt/", "山羊", "The goat ate some green leaves."),
+    ("guard", "/ɡɑːrd/", "警卫；防护", "A guard stands at the gate."),
+    ("gull", "/ɡʌl/", "海鸥", "A gull took the bread from my hand."),
+    ("gum", "/ɡʌm/", "口香糖；牙龈", "She blew a bubble with gum."),
+    ("gun", "/ɡʌn/", "枪", "The toy gun made a loud noise."),
+    ("had", "/hæd/", "有（have 的过去式）", "We had a long meeting yesterday."),
+    ("hair", "/her/", "头发；毛发", "His hair is short and black."),
+    ("halve", "/hæv/", "对半分；减半", "We can halve the cost together."),
+    ("happy", "/ˈhæpi/", "快乐的；高兴的", "She seems happy this morning."),
+    ("hard", "/hɑːrd/", "困难的；硬的", "This question is too hard."),
+    ("hate", "/heɪt/", "讨厌；憎恨", "I hate waiting in line."),
+    ("head", "/hed/", "头；负责人", "He hit his head on the low door."),
+    ("heart", "/hɑːrt/", "心脏；中心", "My heart beats fast when I run."),
+    ("heat", "/hiːt/", "热；加热", "Heat the soup for two minutes."),
+    ("heel", "/hiːl/", "脚后跟；鞋跟", "These shoes have high heels."),
+    ("here", "/hɪr/", "这里", "Come here, please."),
+    ("hide", "/haɪd/", "躲藏；隐藏", "The cat hid under the bed."),
+    ("hill", "/hɪl/", "小山；丘陵", "They climbed the hill before dawn."),
+    ("hoard", "/hɔːrd/", "贮存；积藏", "The squirrel hoarded nuts for winter."),
+    ("home", "/hoʊm/", "家；国内的", "I went home early yesterday."),
+    ("hour", "/ˈaʊər/", "小时；钟头", "The trip took one hour."),
+    ("hurry", "/ˈhɜːri/", "匆忙；赶快", "Hurry up, we are late."),
+    ("hurt", "/hɜːrt/", "疼痛；伤害", "My back hurts after sitting all day."),
+    ("hut", "/hʌt/", "小屋；棚屋", "They slept in a stone hut."),
+    ("Jane", "/dʒeɪn/", "简（女名）", "Jane lives at the end of the street."),
+    ("jaw", "/dʒɔː/", "颌；下巴", "The lion opened its huge jaws."),
+    ("jeer", "/dʒɪr/", "起哄；嘲笑", "The crowd began to jeer at him."),
+    ("joke", "/dʒoʊk/", "笑话；开玩笑", "He told a funny joke."),
+    ("joy", "/dʒɔɪ/", "欢乐；乐趣", "The baby brought us great joy."),
+    ("kite", "/kaɪt/", "风筝", "The boy flew a kite in the field."),
+    ("lack", "/læk/", "缺乏；缺少", "The plants lack water in summer."),
+    ("lead", "/liːd/", "带领；主角（金属铅读 /led/）", "She will lead the research team."),
+    ("leave", "/liːv/", "离开；留下", "The train leaves at six."),
+    ("led", "/led/", "带领（lead 的过去式）", "He led us through the forest."),
+    ("lid", "/lɪd/", "盖子", "Lift the lid carefully."),
+    ("light", "/laɪt/", "光；灯；轻的", "Turn on the light, it is dark."),
+    ("like", "/laɪk/", "喜欢；像", "I like this song very much."),
+    ("live", "/lɪv/", "居住；活着的", "They live in a small flat."),
+    ("load", "/loʊd/", "装载；负担", "Load the boxes into the truck."),
+    ("long", "/lɔːŋ/", "长的；长久的", "The meeting was very long."),
+    ("look", "/lʊk/", "看；表情", "Look at this picture."),
+    ("lost", "/lɔːst/", "丢失的；迷路的", "I lost my keys this morning."),
+    ("lot", "/lɑːt/", "许多；场地", "Thanks a lot for your help."),
+    ("low", "/loʊ/", "低的；浅的", "The plane flew low over the river."),
+    ("luck", "/lʌk/", "运气；幸运", "Good luck with your exam."),
+    ("Luke", "/luːk/", "卢克（男名）", "Luke is a careful driver."),
+    ("lung", "/lʌŋ/", "肺", "He hurt his lung in the accident."),
+    ("lust", "/lʌst/", "强烈欲望；贪欲", "He has little lust for money."),
+    ("mat", "/mæt/", "垫子；席子", "Wipe your feet on the mat."),
+    ("mate", "/meɪt/", "伙伴；配偶", "He went fishing with his mate."),
+    ("member", "/ˈmembər/", "成员；会员", "She is a member of the club."),
+    ("mere", "/mɪr/", "仅仅的；只不过", "It is a mere three dollars."),
+    ("mesh", "/meʃ/", "网眼；网状物", "The net has a fine mesh."),
+    ("met", "/met/", "遇见（meet 的过去式）", "We met last summer."),
+    ("mill", "/mɪl/", "磨坊；工厂", "The old mill is now a museum."),
+    ("mode", "/moʊd/", "方式；模式", "The camera is in auto mode."),
+    ("need", "/niːd/", "需要；必须", "I need your help with this."),
+    ("new", "/nuː/", "新的；新鲜的", "They moved into a new house."),
+    ("night", "/naɪt/", "夜晚；夜间", "The city is bright at night."),
+    ("no", "/noʊ/", "不；没有", "She said no politely."),
+    ("node", "/noʊd/", "节点；结", "Click the node to see the details."),
+    ("not", "/nɑːt/", "不；不是", "He is not at home right now."),
+    ("pain", "/peɪn/", "疼痛；痛苦", "I felt a sharp pain in my knee."),
+    ("pan", "/pæn/", "平底锅", "Put some oil in the pan."),
+    ("Paul", "/pɔːl/", "保罗（男名）", "Paul can play the piano well."),
+    ("pause", "/pɔːz/", "暂停；停顿", "He paused for a moment to think."),
+    ("peas", "/piːz/", "豌豆", "The children shelled the fresh peas."),
+    ("pen", "/pen/", "钢笔；围栏", "Write it with a blue pen."),
+    ("pet", "/pet/", "宠物；爱抚", "A pet dog needs a daily walk."),
+    ("pit", "/pɪt/", "坑；果核", "The car fell into a deep pit."),
+    ("poise", "/pɔɪz/", "镇定；保持平衡", "The bird poised on a thin branch."),
+    ("pole", "/poʊl/", "杆；柱子；极", "He leaned on his long pole."),
+    ("pond", "/pɑːnd/", "池塘", "Ducks swim in the small pond."),
+    ("pool", "/puːl/", "水池；游泳池", "They swam in the hotel pool."),
+    ("pound", "/paʊnd/", "磅；英镑；猛击", "He pounded the table with his fist."),
+    ("pull", "/pʊl/", "拉；拔", "Pull the door to open it."),
+    ("raider", "/ˈreɪdər/", "突袭者；劫匪", "The raiders took the gold and ran."),
+    ("raise", "/reɪz/", "提高；举起；筹集", "They hope to raise more money."),
+    ("ran", "/ræn/", "跑（run 的过去式）", "She ran to the station."),
+    ("rang", "/ræŋ/", "鸣；响（ring 的过去式）", "The telephone rang twice."),
+    ("rank", "/ræŋk/", "等级；排；把…排列", "The soldiers stood in rank."),
+    ("rat", "/ræt/", "老鼠", "A big rat ran across the floor."),
+    ("read", "/riːd/", "阅读（过去式同形，读 /red/）", "I read before bed every night."),
+    ("reader", "/ˈriːdər/", "读者；读物", "He is a slow but careful reader."),
+    ("right", "/raɪt/", "右边；正确的", "Turn right at the corner."),
+    ("ring", "/rɪŋ/", "戒指；铃声；打电话", "She put on a gold ring."),
+    ("rink", "/rɪŋk/", "溜冰场", "They skated at the ice rink."),
+    ("rise", "/raɪz/", "上升；起身", "The sun rises in the east."),
+    ("road", "/roʊd/", "路；道路", "This road leads to the port."),
+    ("rob", "/rɑːb/", "抢劫；偷窃", "Two men tried to rob the bank."),
+    ("robe", "/roʊb/", "长袍；礼服", "She wore a soft silk robe."),
+    ("rot", "/rɑːt/", "腐烂；腐败", "The fruit began to rot in the heat."),
+    ("row", "/roʊ/", "一排；划船（争吵读 /raʊ/）", "We row across the lake every Sunday."),
+    ("rub", "/rʌb/", "擦；摩擦", "He rubbed his tired eyes."),
+    ("rum", "/rʌm/", "朗姆酒", "They mixed the rum with fruit juice."),
+    ("run", "/rʌn/", "跑；运转", "She runs in the park each morning."),
+    ("Ruth", "/ruːθ/", "露丝（女名）", "Ruth sings in the church choir."),
+    ("sail", "/seɪl/", "帆；航行", "The boat set sail at dawn."),
+    ("sat", "/sæt/", "坐（sit 的过去式）", "He sat beside me on the bus."),
+    ("saw", "/sɔː/", "看见（see 的过去式）；锯", "She saw a strange light at sea."),
+    ("say", "/seɪ/", "说；讲", "What did you say just now?"),
+    ("scythe", "/saɪθ/", "大镰刀", "The farmer cut the grass with a scythe."),
+    ("seat", "/siːt/", "座位；使坐下", "Please take your seat."),
+    ("see", "/siː/", "看见；明白", "I can see the mountain from here."),
+    ("seed", "/siːd/", "种子；播种", "Plant the seed in wet soil."),
+    ("sell", "/sel/", "卖；销售", "They sell fresh bread here."),
+    ("sew", "/soʊ/", "缝；缝制", "She can sew her own clothes."),
+    ("shade", "/ʃeɪd/", "阴凉；阴影", "The old tree gives cool shade."),
+    ("shave", "/ʃeɪv/", "刮胡子；剃", "He shaves every morning."),
+    ("shed", "/ʃed/", "棚屋；流出；脱落", "He stored his tools in the shed."),
+    ("sheep", "/ʃiːp/", "绵羊", "The sheep grazed on the hill."),
+    ("sheet", "/ʃiːt/", "床单；一张（纸）", "Change the bed sheet this week."),
+    ("shin", "/ʃɪn/", "小腿胫", "He hurt his shin on the table."),
+    ("ship", "/ʃɪp/", "轮船；运送", "A large ship left the port."),
+    ("shot", "/ʃɑːt/", "射击（shoot 的过去式）；投篮", "The player took a long shot."),
+    ("shout", "/ʃaʊt/", "喊；大叫", "Don't shout at the children."),
+    ("shut", "/ʃʌt/", "关上；闭上", "Shut the window, please."),
+    ("silk", "/sɪlk/", "丝绸；蚕丝", "The dress is made of pure silk."),
+    ("simple", "/ˈsɪmpl/", "简单的；朴素的", "It was a simple question."),
+    ("sin", "/sɪn/", "罪；犯罪", "He regretted his sin at once."),
+    ("sing", "/sɪŋ/", "唱歌；歌唱", "She sings very beautifully."),
+    ("sink", "/sɪŋk/", "水槽；下沉", "The dishes are still in the sink."),
+    ("sit", "/sɪt/", "坐；就位", "Sit down and have a rest."),
+    ("size", "/saɪz/", "大小；尺码", "What size do you wear?"),
+    ("sleep", "/sliːp/", "睡觉；睡眠", "I slept eight hours last night."),
+    ("slip", "/slɪp/", "滑倒；便条", "He slipped on the wet ice."),
+    ("spell", "/spel/", "拼写；咒语", "Can you spell your family name?"),
+    ("spill", "/spɪl/", "洒出；溢出", "He spilled the milk on the table."),
+    ("star", "/stɑːr/", "星；明星", "The stars shine clearly tonight."),
+    ("store", "/stɔːr/", "商店；贮存", "The store opens at nine."),
+    ("sue", "/suː/", "起诉；告发", "They sued the company for damages."),
+    ("sum", "/sʌm/", "总额；算术", "Add the numbers to get the sum."),
+    ("sun", "/sʌn/", "太阳；阳光", "The sun sets in the west."),
+    ("talk", "/tɔːk/", "谈话；讲话", "They talked for an hour."),
+    ("tall", "/tɔːl/", "高的", "Her brother is very tall."),
+    ("taste", "/teɪst/", "品尝；味道", "Taste the soup and add some salt."),
+    ("tease", "/tiːz/", "取笑；戏弄", "The older boys tease their sister."),
+    ("teethe", "/tiːð/", "出牙；长牙", "Babies usually teethe around six months."),
+    ("test", "/test/", "测试；检验", "The English test was easy."),
+    ("thin", "/θɪn/", "瘦的；薄的", "This paper is very thin."),
+    ("thing", "/θɪŋ/", "东西；事情", "What is that black thing?"),
+    ("think", "/θɪŋk/", "想；认为", "I think you are right."),
+    ("thirst", "/θɜːrst/", "渴；渴望", "He drank water to quench his thirst."),
+    ("thorough", "/ˈθɜːroʊ/", "彻底的；周密的", "She gave a thorough explanation."),
+    ("three", "/θriː/", "三", "Three boys are playing outside."),
+    ("toil", "/tɔɪl/", "辛苦劳作；苦役", "He toiled in the fields all day."),
+    ("took", "/tʊk/", "拿；带走（take 的过去式）", "He reached over and took the cup."),
+    ("towel", "/ˈtaʊəl/", "毛巾", "Dry your hands with a clean towel."),
+    ("tower", "/ˈtaʊər/", "塔；高楼", "The old tower is still standing."),
+    ("truth", "/truːθ/", "真相；事实", "Please tell me the truth."),
+    ("Tuesday", "/ˈtuːzdeɪ/", "星期二", "We meet every Tuesday afternoon."),
+    ("van", "/væn/", "厢式货车", "A white van pulled up outside."),
+    ("veal", "/viːl/", "小牛肉", "He ordered roasted veal with rice."),
+    ("veil", "/veɪl/", "面纱；遮蔽物", "The bride wore a white veil."),
+    ("verse", "/vɜːrs/", "诗节；韵文", "She wrote the last verse of the song."),
+    ("very", "/ˈveri/", "非常；正是", "It is very hot today."),
+    ("vest", "/vest/", "背心；马甲", "He wore a warm wool vest."),
+    ("vine", "/vaɪn/", "藤；葡萄藤", "Grapes grow on this vine."),
+    ("wake", "/weɪk/", "醒来；唤醒", "I wake up at seven every day."),
+    ("wall", "/wɔːl/", "墙；围墙", "A picture hung on the wall."),
+    ("water", "/ˈwɔːtər/", "水；浇水", "Drink more water after running."),
+    ("week", "/wiːk/", "周；星期", "See you next week."),
+    ("whale", "/hweɪl/", "鲸", "A huge whale swam past the boat."),
+    ("wheel", "/wiːl/", "轮子；方向盘", "The front wheel is bent."),
+    ("when", "/wen/", "什么时候；当…时", "When do you leave for Beijing?"),
+    ("whim", "/wɪm/", "突发奇想；一时兴起", "He bought the hat on a whim."),
+    ("why", "/hwaɪ/", "为什么", "Why are you late again?"),
+    ("win", "/wɪn/", "赢；获得", "Our team hopes to win."),
+    ("wine", "/waɪn/", "葡萄酒；果酒", "He poured a glass of red wine."),
+    ("won", "/wʌn/", "赢（win 的过去式）", "She won the race easily."),
+    ("wood", "/wʊd/", "木头；树林", "The table is made of wood."),
+    ("wooed", "/wuːd/", "求爱；争取（woo 的过去式）", "He wooed her with patience."),
+    ("wool", "/wʊl/", "羊毛；毛线", "This sweater is pure wool."),
+    ("woos", "/wuːz/", "求爱；争取（woo 的第三人称）", "He woos her with quiet words."),
+    ("world", "/wɜːrld/", "世界", "She wants to travel the world."),
+    ("worry", "/ˈwɜːri/", "担心；烦恼", "Don't worry about the exam."),
+    ("worse", "/wɜːrs/", "更差的；更糟的", "The weather got worse at night."),
+    ("worst", "/wɜːrst/", "最差的；最糟的", "That was my worst day so far."),
+    ("worth", "/wɜːrθ/", "值得…的；价值", "Is the film worth the ticket price?"),
+    ("wreath", "/riːθ/", "花环；花圈", "They laid a wreath at the memorial."),
+    ("writhe", "/rɪð/", "扭动；翻滚", "The worm writhe on the hot stone."),
+    ("yam", "/jæm/", "山药；红薯", "They roasted a yam over the fire."),
+    ("yard", "/jɑːrd/", "院子；码", "The dog runs in the back yard."),
+    ("yawn", "/jɔːn/", "打哈欠", "She yawned because she was tired."),
+    ("year", "/jɪr/", "年；年度", "I stayed there a whole year."),
+    ("yeast", "/jiːst/", "酵母", "Add some yeast to the dough."),
+    ("yellow", "/ˈjeloʊ/", "黄色；黄色的", "The sun looks yellow at dusk."),
+    ("yes", "/jes/", "是；是的", "She answered yes without thinking."),
+    ("yoke", "/joʊk/", "牛轭；束缚", "The ox wore a wooden yoke."),
+    ("young", "/jʌŋ/", "年轻的；幼小的", "The young man asked a good question."),
+    ("youth", "/juːθ/", "青春；年轻人", "He spent his youth in the countryside."),
+    ("zeal", "/ziːl/", "热情；热忱", "She works with great zeal."),
+    ("zip", "/zɪp/", "拉链", "Pull up the zip of your jacket."),
+]
+
 
 def scan_vowel_audio(conn):
     """扫描 static/audio/vowel，把最小对立对音频写进 vowel_groups / vowel_items。"""
@@ -156,7 +473,7 @@ def scan_vowel_audio(conn):
             if not match:
                 print("  跳过无法解析的文件名：", group_key, "/", fname)
                 continue
-            item_no, option_no, word, voice = match.groups()
+            item_no, option_no, word, voice = match.group(1), match.group(2), match.group(3), match.group(4)
             rel = f"static/audio/vowel/{group_key}/{fname}"
             key = (int(item_no), int(option_no))
             row = items.setdefault(key, {"word": word, "f": None, "m": None})
@@ -194,14 +511,46 @@ def scan_vowel_audio(conn):
 
 
 def seed_words(conn):
-    for word, phonetic, cn, example in SEED_WORDS:
+    seed = SEED_WORDS + SEED_WORDS_TEXTBOOK
+    for word, phonetic, cn, example in seed:
         conn.execute(
             "INSERT INTO words(word, phonetic, meaning_cn, example, category) "
             "VALUES(?,?,?,?,'vocabulary') ON CONFLICT(word) DO UPDATE SET "
             "phonetic=excluded.phonetic, meaning_cn=excluded.meaning_cn, example=excluded.example",
             (word, phonetic, cn, example),
         )
-    return len(SEED_WORDS)
+    return len(seed)
+
+
+def scan_word_audio(conn):
+    """扫描 static/audio/word，把教材 3A 的单词音频登记到 words.audio_path。
+
+    只登记词库里已经存在的单词：没有释义的词进听读写会没声音、进看读译会没答案，
+    所以文件名对不上词库的一律列为孤儿并打印出来，提醒先补 SEED_WORDS_TEXTBOOK。
+    """
+    if not os.path.isdir(WORD_AUDIO_DIR):
+        print("未找到单词音频目录，跳过：", WORD_AUDIO_DIR)
+        return 0, []
+
+    matched, orphans, skipped = 0, [], []
+    for fname in sorted(os.listdir(WORD_AUDIO_DIR)):
+        if not os.path.isfile(os.path.join(WORD_AUDIO_DIR, fname)):
+            continue
+        match = WORD_AUDIO_NAME_RE.match(fname)
+        if not match:
+            skipped.append(fname)
+            continue
+        word = match.group(1)
+        if not conn.execute("SELECT 1 FROM words WHERE word = ?", (word,)).fetchone():
+            orphans.append(word)
+            continue
+        rel = f"static/audio/word/{fname}"
+        conn.execute("UPDATE words SET audio_path = ? WHERE word = ?", (rel, word))
+        matched += 1
+
+    for fname in skipped:
+        print("  跳过无法解析的文件名：", fname)
+    return matched, orphans
 
 
 def init_db(reset=False):
@@ -217,12 +566,26 @@ def init_db(reset=False):
     conn.executescript(SCHEMA)
 
     words = seed_words(conn)
-    groups = scan_vowel_audio(conn)
+    scan_vowel_audio(conn)
+    audio_words, orphans = scan_word_audio(conn)
     conn.commit()
 
+    if orphans:
+        print(
+            "  {n} 个单词音频在词库里查不到（没有音标与释义的词不会入库）：{items}".format(
+                n=len(orphans), items=" ".join(orphans)
+            )
+        )
+
+    total_groups = conn.execute("SELECT COUNT(*) AS c FROM vowel_groups").fetchone()["c"]
+    total_items = conn.execute("SELECT COUNT(*) AS c FROM vowel_items").fetchone()["c"]
     print(
-        "数据库初始化完成 → {path}\n  单词 {w} 条，近似音组 {g} 组".format(
-            path=os.path.relpath(DB_PATH, BASE_DIR), w=words, g=groups
+        "数据库初始化完成 → {path}\n  单词 {w} 条（真人音频 {wa} 条），近似音组 {g} 组，最小对立音频 {i} 条".format(
+            path=os.path.relpath(DB_PATH, BASE_DIR),
+            w=words,
+            wa=audio_words,
+            g=total_groups,
+            i=total_items,
         )
     )
     conn.close()

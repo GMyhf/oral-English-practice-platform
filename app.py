@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import uuid
 from functools import wraps
 
@@ -31,8 +32,46 @@ if not os.environ.get("SECRET_KEY"):
 
 RECORDING_EXTENSIONS = {"webm", "ogg", "wav", "mp4", "m4a", "mp3", "mpeg"}
 
+# 录音文件名一律由后端生成：u<用户 id>_<12 位十六进制>.<扩展名>
+RECORDING_NAME_RE = re.compile(r"^u(\d+)_[0-9a-f]{12}\.[A-Za-z0-9]{1,8}$")
+
 
 # ---------------------------------------------------------------- 工具
+
+def own_recording_path(rel_path, user_id):
+    """只承认后端为当前用户生成的录音文件。
+
+    提交成绩时 recording_path 来自前端，不加校验就能把别人的录音路径写进
+    自己的记录里回放，也允许塞进任意字符串。不匹配时按「没有录音」处理。
+    """
+    if not rel_path:
+        return None
+    name = str(rel_path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    match = RECORDING_NAME_RE.match(name)
+    if not match or int(match.group(1)) != user_id:
+        return None
+    return f"{config.RECORDING_DIR}/{name}"
+
+
+MISSING = object()
+
+
+def as_count(value, fallback):
+    """把前端传来的题量规整成 1..MAX_QUESTION_COUNT，非法值抛 ValueError 让接口回 400。
+
+    键根本没出现时用 fallback；显式传 null 是前端的 bug，不能被默认值悄悄掩盖。
+    """
+    if value is MISSING:
+        return fallback
+    if value is None:
+        raise ValueError("题目数量不能是 null")
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        raise ValueError("题目数量必须是数字")
+    if number < 1:
+        raise ValueError("题目数量至少为 1")
+    return min(number, config.MAX_QUESTION_COUNT)
 
 def current_user():
     if "user_id" not in g:
@@ -314,7 +353,12 @@ def result_page(session_id):
         item["audio_url"] = item.get("audio_url") or ""
         items.append(item)
 
-    params = json.loads(row["params_json"] or "{}")
+    try:
+        params = json.loads(row["params_json"] or "{}")
+    except (TypeError, ValueError):
+        params = {}
+    if not isinstance(params, dict):
+        params = {}     # 早期脏数据里 params 可能是字符串，避免结果页整页 500
     return render_template("result.html", session_row=dict(row), params=params, items=items)
 
 
@@ -328,9 +372,10 @@ def api_vowel_questions():
     if not practice.VOWEL_MODES.get(mode):
         return jsonify({"error": "句子练习的音频题库还没上线，请先选单词练习"}), 400
     try:
+        requested = as_count(data.get("count", MISSING), 10)
         questions = practice.build_vowel_questions(
             data.get("group_key", ""),
-            data.get("count", 10),
+            requested,
             data.get("voice", "f"),
         )
     except (ValueError, TypeError) as exc:
@@ -339,7 +384,12 @@ def api_vowel_questions():
     for q in questions:
         q["audio_url"] = audio_url(q["audio"])
         q.pop("audio", None)
-    return jsonify({"questions": questions, "time_limit": current_user()["time_limit"]})
+    return jsonify({
+        "questions": questions,
+        "time_limit": current_user()["time_limit"],
+        "requested": requested,
+        "actual": len(questions),
+    })
 
 
 @app.get("/api/words/all")
@@ -354,10 +404,20 @@ def api_words_all():
 @api_login_required
 def api_words():
     data = json_body()
-    words = practice.random_words(data.get("count", config.DEFAULT_QUESTION_COUNT))
+    try:
+        requested = as_count(data.get("count", MISSING), config.DEFAULT_QUESTION_COUNT)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    words, bank_size = practice.random_words(requested)
     for w in words:
         w["audio_url"] = audio_url(w.pop("audio_path"))
-    return jsonify({"words": words})
+    # actual < requested 说明词库不够，前端要提示用户实际只练了 actual 题
+    return jsonify({
+        "words": words,
+        "requested": requested,
+        "actual": len(words),
+        "bank_size": bank_size,
+    })
 
 
 @app.post("/api/practice/session")
@@ -367,10 +427,15 @@ def api_create_session():
     ptype = data.get("practice_type")
     if ptype not in practice.PRACTICE_TYPES:
         return jsonify({"error": "未知的练习类型"}), 400
+    params = data.get("params")
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return jsonify({"error": "params 必须是对象"}), 400
     db = get_db()
     cur = db.execute(
         "INSERT INTO practice_sessions(user_id, practice_type, params_json) VALUES(?,?,?)",
-        (current_user()["id"], ptype, json.dumps(data.get("params") or {}, ensure_ascii=False)),
+        (current_user()["id"], ptype, json.dumps(params, ensure_ascii=False)),
     )
     db.commit()
     return jsonify({"session_id": cur.lastrowid})
@@ -382,8 +447,13 @@ def api_finish_session():
     """练习结束时一次性提交全部作答记录，题目信息和音频路径都存进 question_json 供回看。"""
     data = json_body()
     session_id = data.get("session_id")
-    records = data.get("records") or []
+    records = data.get("records")
     uid = current_user()["id"]
+
+    if not isinstance(records, list):
+        return jsonify({"error": "records 必须是数组"}), 400
+    if len(records) > config.MAX_QUESTION_COUNT:
+        return jsonify({"error": f"单次最多提交 {config.MAX_QUESTION_COUNT} 题"}), 400
 
     db = get_db()
     row = db.execute(
@@ -393,26 +463,49 @@ def api_finish_session():
     if not row:
         return jsonify({"error": "练习会话不存在"}), 404
 
+    # 先把所有记录校验完再动数据库：边校验边写会让一条脏数据把已有成绩删掉后 500
+    parsed = []
+    for index, rec in enumerate(records, start=1):
+        if not isinstance(rec, dict):
+            return jsonify({"error": f"第 {index} 条记录格式不正确"}), 400
+        try:
+            seq = int(rec.get("seq", index))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"第 {index} 条记录的题号不是数字"}), 400
+
+        # question 缺省或 null 容忍（老客户端可能不带），但带了就必须是对象，
+        # 否则结果页会渲染出一张空白题卡，把前端的 bug 藏成"没记录"
+        payload = rec.get("question", MISSING)
+        if payload is None:
+            payload = {}
+        if payload is not MISSING and not isinstance(payload, dict):
+            return jsonify({"error": f"第 {index} 条记录的 question 必须是对象"}), 400
+        if payload is MISSING:
+            payload = {}
+        payload.setdefault("type", rec.get("type"))
+
+        answer = rec.get("user_answer")
+        # 只收标量：dict/list 直接 str() 会存成 "{'a': 1}" 这样的脏答案显示在结果页上
+        if answer is not None and not isinstance(answer, (str, int, float, bool)):
+            return jsonify({"error": f"第 {index} 条记录的 user_answer 必须是文本或数字"}), 400
+        parsed.append((
+            seq,
+            json.dumps(payload, ensure_ascii=False),
+            None if answer is None else str(answer)[:200],
+            1 if rec.get("is_correct") else 0,
+            own_recording_path(rec.get("recording_path"), uid),
+        ))
+
     db.execute("DELETE FROM practice_records WHERE session_id = ?", (session_id,))
     correct = 0
-    for rec in records:
-        is_correct = 1 if rec.get("is_correct") else 0
+    for seq, payload_json, answer, is_correct, recording in parsed:
         correct += is_correct
-        payload = rec.get("question") or {}
-        payload.setdefault("type", rec.get("type"))
         db.execute(
             "INSERT INTO practice_records(session_id, seq, question_json, user_answer, "
             "is_correct, recording_path) VALUES(?,?,?,?,?,?)",
-            (
-                session_id,
-                int(rec.get("seq", 0)),
-                json.dumps(payload, ensure_ascii=False),
-                rec.get("user_answer"),
-                is_correct,
-                rec.get("recording_path"),
-            ),
+            (session_id, seq, payload_json, answer, is_correct, recording),
         )
-    total = len(records)
+    total = len(parsed)
     db.execute(
         "UPDATE practice_sessions SET total = ?, correct_count = ?, wrong_count = ?, "
         "finished = 1 WHERE id = ?",

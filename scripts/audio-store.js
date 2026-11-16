@@ -162,6 +162,12 @@ function bindWordAudio(getCurrentWord) {
     if (!badge) return;
     const w = getCurrentWord();
     if (!w) { badge.textContent = ""; return; }
+    // 发音来源有三种，只看本地音频会把服务器的真人音频误报成「合成发音」。
+    if (w.audio_url) {
+      badge.className = "badge rounded-pill text-bg-success";
+      badge.innerHTML = `<i class="bi bi-headphones me-1"></i>真人音频：${w.word}`;
+      return;
+    }
     const local = WordAudio.has(w.word);
     badge.className = "badge rounded-pill " + (local ? "text-bg-info" : "text-bg-light text-dark border");
     badge.innerHTML = local

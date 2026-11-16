@@ -60,7 +60,31 @@ const Common = (() => {
     speechSynthesis.speak(u);
   }
 
-  function toast(message, variant = "secondary") {
+  /** 语音列表是异步加载的：浏览器首次 getVoices() 往往返回空数组，
+      此时直接 speak() 完全无声。练习开始前先调本方法预热一次。 */
+  function warmUpSpeech(timeoutMs = 800) {
+    if (!("speechSynthesis" in window)) return Promise.resolve(false);
+    if (speechSynthesis.getVoices().length) return Promise.resolve(true);
+    return new Promise(resolve => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        speechSynthesis.removeEventListener("voiceschanged", done);
+        resolve(speechSynthesis.getVoices().length > 0);
+      };
+      speechSynthesis.addEventListener("voiceschanged", done);
+      setTimeout(done, timeoutMs);
+    });
+  }
+
+  /** 这台设备到底能不能合成英文发音（没有语音包时听读写等于出静音题） */
+  function speechReady() {
+    if (!("speechSynthesis" in window)) return false;
+    return speechSynthesis.getVoices().some(v => /^en/i.test(v.lang || ""));
+  }
+
+  function toast(message, variant = "secondary", ms = 2600) {
     let host = document.getElementById("toast-host");
     if (!host) {
       host = document.createElement("div");
@@ -73,7 +97,7 @@ const Common = (() => {
     box.className = `alert alert-${variant} shadow py-2 px-3`;
     box.textContent = message;
     host.appendChild(box);
-    setTimeout(() => box.remove(), 2600);
+    setTimeout(() => box.remove(), ms);
   }
 
   function wait(ms) {
@@ -105,7 +129,10 @@ const Common = (() => {
     return { promise, stop };
   }
 
-  return { api, getJson, playUrl, stopAudio, speak, toast, wait, fmtTime, startCountdown };
+  return {
+    api, getJson, playUrl, stopAudio, speak, warmUpSpeech, speechReady,
+    toast, wait, fmtTime, startCountdown
+  };
 })();
 
 /** 录音：优先 MediaRecorder，全部编码都不支持时（部分 iOS Safari）用 Web Audio 自己编码 WAV */

@@ -66,11 +66,19 @@
       const data = await Common.api("/api/words", { count });
       words = data.words;
       if (!words.length) throw new Error("词库里没有单词，请先运行 scripts/init_db.py");
+      if (data.actual < data.requested) {
+        // 以前这里会把用户选的 100 题静默变成 30 题，现在如实说明
+        Common.toast(`词库里只有 ${data.bank_size} 个单词，本次按 ${data.actual} 题进行`, "warning", 4200);
+      }
+
+      // 浏览器语音列表是异步加载的，不预热的话第一个单词的合成发音完全无声
+      await Common.warmUpSpeech();
 
       if (window.WordAudio) {
         WordAudio.setWordList(words);
         await WordAudio.refresh().catch(() => {});
       }
+      warnIfNoAudioSource();
 
       $("setup").classList.add("d-none");
       $("stage").classList.remove("d-none");
@@ -86,6 +94,9 @@
   async function runRound1() {
     setStageTitle(`第一轮 · 朗读（共 ${words.length} 个词）`);
     setPane("round1");
+    // 第一轮不显示作答框，先把它们置为不可用，避免"看不见但仍可输入"的状态
+    $("answer-input").disabled = true;
+    $("answer-submit").disabled = true;
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
       const seq = i + 1;
@@ -200,8 +211,12 @@
         recording_path: (recordings[seq] || {}).path || null
       });
 
+      // 一题判完就让输入框和提交按钮失去响应：第二轮中间的 250ms 空隙、
+      // 以及回跳到第一轮时，看不见的输入框不应该还能被键盘敲进去
       $("answer-submit").onclick = null;
       $("answer-input").onkeydown = null;
+      $("answer-input").disabled = true;
+      $("answer-submit").disabled = true;
       await Common.wait(250);
     }
     await finish();
@@ -215,6 +230,17 @@
   }
 
   // ---------------------------------------------------------------- 辅助
+
+  /** 听读写全程不显示拼写，一旦三种发音来源都不可用，用户听到的就是静音 */
+  function warnIfNoAudioSource() {
+    if (!(cfg.playAudioRound1 || cfg.playAudioRound2)) return;
+    const hasServerAudio = words.some(w => w.audio_url);
+    const hasLocalAudio = window.WordAudio && WordAudio.known.size > 0;
+    if (hasServerAudio || hasLocalAudio || Common.speechReady()) return;
+    Common.toast(
+      "这台设备上既没有这些单词的音频，浏览器也没有可用的英文语音，听读写会听不到声音。" +
+      "请用下方「音频导入」上传单词音频，或换一台装有英文语音的设备。", "danger", 9000);
+  }
 
   async function playStandard(word) {
     try {
@@ -263,13 +289,16 @@
   async function timedBar(ms) {
     const started = Date.now();
     return new Promise(resolve => {
-      const tick = () => {
+      // 用 setInterval 而不是 requestAnimationFrame：标签页切到后台时 rAF 会完全停摆，
+      // 练习就卡在正在录音的那一个单词上。
+      const id = setInterval(() => {
         const left = ms - (Date.now() - started);
         setTimerBar(Math.max(0, left / ms));
-        if (left <= 0) return resolve();
-        requestAnimationFrame(tick);
-      };
-      tick();
+        if (left <= 0) {
+          clearInterval(id);
+          resolve();
+        }
+      }, 50);
     });
   }
 
