@@ -18,7 +18,7 @@ from flask import (
     session,
     url_for,
 )
-from services import auth, practice
+from services import auth, practice, registration
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -290,22 +290,31 @@ def register():
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
         nickname = request.form.get("nickname", "")
+        # 码原样回显：填错了不用重敲，学生手机上一个一个字补很难受
+        invite_code = request.form.get("invite_code", "").strip()
+        # 提交时的口径以服务端为准，不看前端有没有把输入框渲染出来：
+        # 拿着 open 状态下缓存的表单 POST 到 invite / closed 状态，一样会被挡。
+        gate = registration.state()
+
+        def fail(message, status=400):
+            return render_template("register.html", error=message, gate=gate,
+                                   username=username, nickname=nickname,
+                                   invite_code=invite_code), status
+
+        if not gate["form_open"]:
+            return fail(gate["hint"], 403)
         if password != confirm:
-            return render_template("register.html", error="两次输入的密码不一致",
-                                   username=username, nickname=nickname), 400
+            return fail("两次输入的密码不一致")
         try:
-            user = auth.register(username, password, nickname)
+            user = auth.register(username, password, nickname, invite_code)
         except auth.HashQueueFull:
-            return render_template("register.html",
-                                   error="同时注册的人有点多，请过几秒再试一次",
-                                   username=username, nickname=nickname), 503
+            return fail("同时注册的人有点多，请过几秒再试一次", 503)
         except auth.AuthError as exc:
-            return render_template("register.html", error=str(exc),
-                                   username=username, nickname=nickname), 400
+            return fail(str(exc))
         session["user_id"] = user["id"]
         return redirect(url_for("practice"))
 
-    return render_template("register.html")
+    return render_template("register.html", gate=registration.state())
 
 
 @app.route("/logout", methods=["POST", "GET"])

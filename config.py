@@ -69,6 +69,29 @@ HASH_QUEUE_TIMEOUT = float(os.environ.get("HASH_QUEUE_TIMEOUT", "20"))
 # 应用自己不限 —— 换台前面没有 nginx 的机器就是裸奔。
 MAX_UPLOAD_MB = float(os.environ.get("MAX_UPLOAD_MB", "20"))
 
+# ------------------------------------------------------------------ 注册闸门
+#
+# 这门课的站只要挂在能被扫到的地址上，开放注册就等于请扫描器进来：机器人在几天内
+# 会把注册页试一遍，注册进来的假账号既占库又会产生录音文件（磁盘 33G 空闲）。
+# 所以注册改成要邀请码，码存在数据库里（见 services/registration.py），
+# 增删换码都不用重启服务。
+#
+#   open     —— 谁都能注册。只适合本地开发。
+#   invite   —— 必须填对邀请码（**默认值，也是部署该用的值**）。
+#   closed   —— 彻底停止注册，连码都不收。第一周开课后用它。
+#
+# 默认取 invite 是有意的：宁可「忘了配码 → 没人注册得上」，
+# 也不要「忘了配 → 全班匿名注册口对公网敞开」。本地开发要放开就显式设
+# FLASK 环境里的 REGISTER_MODE=open，或者跑一句 scripts/manage_invite.py add 造个码。
+# 注意这个值在 import 时读一次，改完要重启服务才生效（码本身不用）。
+REGISTER_MODE = os.environ.get("REGISTER_MODE", "invite").strip().lower()
+
+# 邀请码的尝试结果不在这里限流：挡爆破靠的是码的熵（manage_invite.py 不给参数时
+# 用 secrets 生成 12 位 url-safe，约 71 bit），而不是靠计数器。进程内计数器在多
+# worker 下各记各的，还会被人故意触发把全班锁在门外。真挂公网要在 nginx 那一层
+# 给 /register 加 limit_req，见 /etc/english-practice/HANDOVER.md。
+REGISTER_CODE_LENGTH = int(os.environ.get("REGISTER_CODE_LENGTH", "12"))
+
 DEFAULT_QUESTION_COUNT = 20
 DEFAULT_TIME_LIMIT = 1      # 近似音区分每题默认秒数
 MAX_QUESTION_COUNT = 100    # 防止用户输入离谱的值

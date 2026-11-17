@@ -28,6 +28,14 @@ python app.py                     # 打开 http://127.0.0.1:5000
 `init_db.py` 会重复执行（`CREATE TABLE IF NOT EXISTS`）。想清空重来用
 `python scripts/init_db.py --reset`，这会删除所有账号和练习记录。
 
+**本地第一次注册会被邀请码挡住**（`REGISTER_MODE` 默认 `invite`，见「注册保护」一节）。
+开发机上要么先发个码，要么显式关掉闸门：
+
+```bash
+python scripts/manage_invite.py add            # 造一个码，注册页照着填
+set REGISTER_MODE=open && python app.py        # Windows；本地开发直接敞开
+```
+
 ## 目录结构
 
 ```
@@ -35,8 +43,12 @@ app.py                路由与 API
 config.py             题量/限时默认值、音频目录等
 db.py                 SQLite 连接
 services/auth.py      注册、登录、改密码、设置
+services/registration.py
+                      注册闸门：邀请码的校验 / 占用 / 吊销，码存在数据库里不在配置里
 services/practice.py  抽题（近似音对立对随机、乱序选项、单词每题随机抽男声/女声）
 scripts/init_db.py    建库、种子数据、扫描 static/audio 下的近似音 / 句子 / 单词音频
+scripts/manage_invite.py
+                      发码 / 码表 / 吊销 / 查「谁用哪个码注册」，第一次跑顺手补上那两张表
 scripts/import_audio_package.py
                       把教材配套录音（3B 单词对立对 / 4A 句子对立词 / 3A 单词朗读）
                       复制进 static/audio，命名沿用平台约定，幂等可重跑
@@ -99,6 +111,47 @@ params，结果页标成「第一轮（秒） = 3」这样的中文徽章。
 
 结束后统一提交到 `/api/practice/finish`，跳转 `/result/<会话 id>` 逐题回看，
 可以重听标准发音和自己的朗读。
+
+## 注册保护（邀请码）
+
+这个站早晚会挂在能被扫到的地址上，所以注册默认要一个由老师发出去的口令：
+
+| `REGISTER_MODE` | 行为 |
+| --- | --- |
+| `open` | 谁都能注册。只适合开发机。 |
+| `invite`（默认） | 必须填对邀请码。库里一个码都没有时，注册页直接显示「老师还没有发放邀请码，注册暂未开放」，不放行。 |
+| `closed` | 整个注册口关掉，连码都不收。第一周开课之后用它。 |
+
+码存在数据库里（`invite_codes` 一张表，`invite_uses` 记「谁用哪个码注册」），不写在配置里，
+所以**发码、换码、吊销都不用重启服务**；只有 `REGISTER_MODE` 这个开关是 `config.py` 在
+import 时读一次的，改完要重启。
+
+```bash
+python scripts/manage_invite.py add                    # 随机生成一个不限次数的码
+python scripts/manage_invite.py add pku2026 --note 群里发
+python scripts/manage_invite.py add --max-uses 1       # 一码一号，发给某一个人
+python scripts/manage_invite.py list                   # 现有的码、各用掉了几个
+python scripts/manage_invite.py users pku2026          # 这个码注册过谁
+python scripts/manage_invite.py revoke pku2026         # 码泄露了：立刻失效，记录留着
+python scripts/manage_invite.py purge pku2026          # 确认不用追溯了再硬删
+```
+
+闸门只卡**新注册**：已经存在的账号登录、改密码、练习、上传录音全部照旧。
+
+三个不显然的决定，改代码前先看 `services/registration.py` 开头那段：
+
+- **校验排在密码哈希之前**。一次 scrypt 在部署那台 1 核机上是 72ms / +18MB，
+  先哈希再拒等于送外面一个「他零成本、我们烧 CPU」的放大口子。
+- **默认是关（fail-closed）**。忘了配码的后果是「没人注册得上」，而不是
+  「注册口对公网敞开」；`REGISTER_MODE` 写了非法值同样退回 `invite`。
+- **随机码只用 `abcdefghjkmnpqrstuvwxyz23456789`**，默认 12 位（约 61 bit）。去掉
+  0/O、1/I/l 是因为手机上手输几乎必错；服务端比较前统一转小写，iOS 的首字母自动大写
+  不会把人坑在门外。
+
+应用侧故意没做「同一个 IP 试错几次就锁住」：gunicorn 是 2 个进程，计数各记各的，
+实际上限是配额的 2 倍，形同虚设；反代后面拿不到真实 IP（没装 ProxyFix）；而按目标计数的
+锁闸本身就是自我拒绝服务——机器人自己撞满配额，全班就注册不上了。挡口令爆破靠的是码的熵。
+真要对公网，限速加在 nginx 那一层（`limit_req_zone` + `location = /register`）。
 
 ## 移动端
 

@@ -11,6 +11,10 @@
     <div class="alert alert-danger py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}</div>
     {% endif %}
 
+    {% if not gate.form_open %}
+    {# 闸门关着（closed）或者一个码都没发：表单提交上去必然被拒，就别让人填了 #}
+    <div class="alert alert-secondary mb-0">{{ gate.hint }}</div>
+    {% else %}
     <form method="post" action="{{ url_for('register') }}">
       <div class="mb-3">
         <label class="form-label" for="username">用户名（3-32 位字母、数字、下划线或中文）</label>
@@ -20,6 +24,21 @@
                  maxlength="32" value="{{ username or '' }}" autocomplete="username">
         </div>
       </div>
+      {% if gate.invite_required %}
+      <div class="mb-3">
+        <label class="form-label" for="invite_code">邀请码（任课老师发放）</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-ticket-perforated"></i></span>
+          {# autocapitalize/spellcheck 是给手机端准备的：iOS 会把输入框首字母自动大写，
+             服务端比较前统一转小写（services.registration.normalize），所以大写不会报错，
+             但让码看起来变了样会让人反复重输。 #}
+          <input type="text" class="form-control" id="invite_code" name="invite_code" required
+                 maxlength="64" value="{{ invite_code or '' }}" autocomplete="off"
+                 autocapitalize="none" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="form-text">码里没有 0 / O / 1 / I / l 这几个容易看错的字符。</div>
+      </div>
+      {% endif %}
       <div class="mb-3">
         <label class="form-label" for="nickname">昵称（可选，仅显示用）</label>
         <div class="input-group">
@@ -50,6 +69,7 @@
         已有账号？<a href="{{ url_for('login') }}" class="text-decoration-none">直接登录 →</a>
       </div>
     </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

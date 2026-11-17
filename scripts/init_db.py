@@ -22,6 +22,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from db import connect as connect_db, resolve_db_path  # noqa: E402
+from services import registration  # noqa: E402  只为拿那两张邀请码表的 DDL，见下面 SCHEMA
 
 # 库路径和 pragma 都从 db.py 拿，不要再在这里写死第二份 ——
 # 以前两边各写一份 BASE_DIR/data/app.db，结果 config.DATABASE_PATH 形同虚设，
@@ -128,7 +129,13 @@ CREATE TABLE IF NOT EXISTS practice_records (
 );
 """
 
+# 邀请码那两张表的定义放在 services/registration.py —— 闸门逻辑和表结构必须在
+# 同一个文件里演进，写两份迟早会走偏。这里拼进来，init_db 一次建全。
+SCHEMA += "\n".join(registration.TABLE_DDL)
+
 DROP = """
+DROP TABLE IF EXISTS invite_uses;
+DROP TABLE IF EXISTS invite_codes;
 DROP TABLE IF EXISTS practice_records;
 DROP TABLE IF EXISTS practice_sessions;
 DROP TABLE IF EXISTS sentence_items;

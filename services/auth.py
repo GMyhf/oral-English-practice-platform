@@ -6,6 +6,7 @@ import threading
 
 import config
 from db import get_db
+from services import registration
 from werkzeug.security import check_password_hash, generate_password_hash
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fa5]{3,32}$")
@@ -113,10 +114,18 @@ def get_user(user_id):
     return _row_to_user(row)
 
 
-def register(username, password, nickname=None):
+def register(username, password, nickname=None, invite_code=None):
     username = (username or "").strip()
     if not USERNAME_RE.match(username):
         raise AuthError("用户名需为 3-32 位字母、数字、下划线或中文")
+    # 注册闸门排在**密码哈希之前**，顺序不能挪：一次 scrypt 是这台 1 核机上最贵的
+    # 动作（72ms / +18MB），先哈希再拒等于让任何人拿一个错码就免费让我们算一遍。
+    # 一次性码的「占用」也在这条链上，但真正扣次数要等到用户插入前一刻（见下面），
+    # 免得查重失败还把码用掉了。
+    try:
+        claim = registration.check(invite_code)
+    except registration.RegistrationError as exc:
+        raise AuthError(str(exc))
     if not password or len(password) < MIN_PASSWORD_LEN:
         raise AuthError(f"密码至少 {MIN_PASSWORD_LEN} 位")
     if len(password) > MAX_PASSWORD_LEN:
@@ -132,6 +141,9 @@ def register(username, password, nickname=None):
             "INSERT INTO users(username, password_hash, nickname) VALUES(?,?,?)",
             (username, digest, (nickname or username).strip()),
         )
+        # 码在这里才真正消耗掉，和上面那条 INSERT 同一个事务：
+        # 要么「多了一个用户 + 少了一次码」一起成立，要么一起回滚。
+        registration.record(claim, cur.lastrowid)
         db.commit()
     except sqlite3.IntegrityError:
         # 上面那次「有没有重名」的检查挡不住真正的并发：两个人同一瞬间注册同名，
@@ -139,6 +151,10 @@ def register(username, password, nickname=None):
         # 学生看到的是「服务器内部错误」而不是「该用户名已被注册」。
         db.rollback()
         raise AuthError("该用户名已被注册")
+    except registration.RegistrationError as exc:
+        # 码在被挡下的那一瞬间刚好被别人用完了
+        db.rollback()
+        raise AuthError(str(exc))
     return get_user(cur.lastrowid)
 
 
