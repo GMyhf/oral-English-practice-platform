@@ -74,12 +74,24 @@ DEFAULT_TIME_LIMIT = 1      # 近似音区分每题默认秒数
 MAX_QUESTION_COUNT = 100    # 防止用户输入离谱的值
 
 # 看读译 / 听读写各三段节奏，都是 (下限, 上限, 默认)，单位秒。
-# 默认值就是以前写死的那几个数：第一轮 1 秒（看词朗读 / 跟读录音）、
-# 第二轮 5 秒（写译文或拼写）、题目之间停一下再进下一题。
-# 现在这三段都能在练习设置里自己改，边界只有这一份，前端输入框和 JS 都从这里取。
-ROUND1_SECONDS = (0.3, 20, 1)
+# 第二轮 5 秒、题间停顿 0.2 秒是以前就写死的那两个数；第一轮（录音那一段）
+# 2026-11-17 从 1 秒调到 1.5 秒 —— 一个单词念 1 秒普遍偏赶，尤其听读写是
+# 「音频放完之后再走满第一轮」，那 1 秒只是音频之后的尾巴。
+# 这三段现在都能存进账号（设置页 → 看读译 / 听读写），(下限, 上限) 仍然是唯一一份边界：
+# 练习页和设置页的输入框、services/auth.update_settings 的夹取、tworounds.js 的
+# 「输入框不在时的兜底值」都以这里为准。
+ROUND1_SECONDS = (0.3, 20, 1.5)
 ROUND2_SECONDS = (1, 60, 5)
 ROUND_GAP_SECONDS = (0, 3, 0.2)
+
+# 三段节奏 → users 表里那一列。app.rhythm_defaults() 与 auth.update_settings()
+# 共用这张表，免得「设置页能填的字段」和「练习页读的字段」两处各写一遍、日后走偏。
+# 键名跟着模板里的 rhythm.round1 / round2 / gap 走。
+RHYTHM_FIELDS = {
+    "round1": ("round1_seconds", ROUND1_SECONDS),
+    "round2": ("round2_seconds", ROUND2_SECONDS),
+    "gap": ("round_gap_seconds", ROUND_GAP_SECONDS),
+}
 
 
 DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() == "true"

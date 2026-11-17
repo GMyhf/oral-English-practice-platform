@@ -38,7 +38,8 @@
     </div>
 
     <div class="form-check form-switch mt-3 mb-0">
-      <input class="form-check-input" type="checkbox" role="switch" id="overlap_record" checked>
+      <input class="form-check-input" type="checkbox" role="switch" id="overlap_record"
+             {% if overlap %}checked{% endif %}>
       <label class="form-check-label" for="overlap_record">
         第一轮边播边录
         <span class="text-muted small">（标准音与录音同时开始，跟着念）</span>

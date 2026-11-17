@@ -53,9 +53,11 @@
   };
   const cfg = CFG[practiceType];
 
-  // 输入框不在的时候（比如别处复用这段脚本）退回以前写死的那三个值
-  const FALLBACK_SECONDS = { round1_seconds: 1, round2_seconds: 5, round_gap: 0.2 };
-  let round1Ms = 1000;
+  // 输入框不在的时候（比如别处复用这段脚本）退回 config 里那三个默认值。
+  // 这三个数在 config.py 的 ROUND1_SECONDS / ROUND2_SECONDS / ROUND_GAP_SECONDS 里也有，
+  // 改默认时长记得两边一起改（1.5 秒就是 2026-11-17 从 1 秒调上来的那次）。
+  const FALLBACK_SECONDS = { round1_seconds: 1.5, round2_seconds: 5, round_gap: 0.2 };
+  let round1Ms = 1500;
   let round2Ms = 5000;
   let gapMs = 200;
   let overlap = false;         // 听读写第一轮是否边播边录，点「开始练习」时定死

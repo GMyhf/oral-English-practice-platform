@@ -194,7 +194,15 @@ def change_username(user_id, new_username):
     return new_username
 
 
-def update_settings(user_id, default_count=None, time_limit=None, voice=None):
+def update_settings(user_id, default_count=None, time_limit=None, voice=None,
+                    round1_seconds=None, round2_seconds=None, round_gap_seconds=None,
+                    overlap_record=None):
+    """把 /settings 表单里那几项存进账号。
+
+    约定：**参数没传（None）= 这一项不动**，传了值就夹到边界内再写。
+    所以复选框这种「不勾就整个字段不提交」的控件，由调用方补成 "0" 再传进来
+    （见 app.settings），否则「关掉边播边录」会被当成没提交而存不下去。
+    """
     db = get_db()
     if default_count is not None:
         count = _clamp(default_count, 1, config.MAX_QUESTION_COUNT, config.DEFAULT_QUESTION_COUNT)
@@ -205,6 +213,18 @@ def update_settings(user_id, default_count=None, time_limit=None, voice=None):
     if voice is not None:
         voice = voice if voice in ALLOWED_VOICES else "f"
         db.execute("UPDATE users SET voice = ? WHERE id = ?", (voice, user_id))
+    # 三段时长的上下限只有 config.RHYTHM_FIELDS 那一份：设置页的输入框、练习页的输入框、
+    # 这里的夹取都读它，改边界只改一处。
+    for name, value in (("round1", round1_seconds), ("round2", round2_seconds),
+                        ("gap", round_gap_seconds)):
+        if value is None:
+            continue
+        column, (low, high, default) = config.RHYTHM_FIELDS[name]
+        db.execute("UPDATE users SET %s = ? WHERE id = ?" % column,
+                   (_clamp(value, low, high, default), user_id))
+    if overlap_record is not None:
+        db.execute("UPDATE users SET overlap_record = ? WHERE id = ?",
+                   (1 if str(overlap_record) in ("1", "on", "true", "True") else 0, user_id))
     db.commit()
 
 

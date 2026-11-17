@@ -335,16 +335,41 @@ def practice_vowel():
     )
 
 
-def rhythm_defaults():
-    """看读译 / 听读写练习页的三个时间输入框：min / max / 默认值都来自 config。
+def _fmt_seconds(value):
+    """输入框里的数：5.0 写成 5、1.50 写成 1.5。挂一串 .0 既难看也更占地方。"""
+    return f"{round(float(value), 2):g}"
 
-    只在这里展开一份，模板负责渲染边界，tworounds.js 再按输入框的 min/max 夹一遍，
+
+def rhythm_defaults(user=None):
+    """看读译 / 听读写那三个时长输入框的 min / max / 默认值。
+
+    边界只有 `config.RHYTHM_FIELDS` 这一份；**默认值优先取账号里存的那份**（在 /settings 改），
+    没存过就退回 config 的默认值，存了个出格的值（比如以后把上限调小了）就夹回边界。
+    库里连这一列都还没有（老库没跑 scripts/init_db.py 补列）也当「没存过」处理，
+    练习页照常能开，只是设置保存不下来。
+
+    模板负责渲染边界，tworounds.js 再按输入框的 min/max 夹一遍，
     不会出现「页面允许 999 秒而脚本按 5 秒跑」这种两边不一致。
     """
-    keys = {"round1": config.ROUND1_SECONDS, "round2": config.ROUND2_SECONDS,
-            "gap": config.ROUND_GAP_SECONDS}
-    return {name: {"min": lo, "max": hi, "value": default}
-            for name, (lo, hi, default) in keys.items()}
+    out = {}
+    for name, (column, (lo, hi, default)) in config.RHYTHM_FIELDS.items():
+        value = default
+        stored = user.get(column) if isinstance(user, dict) else None
+        if stored is not None:
+            try:
+                value = max(lo, min(hi, float(stored)))
+            except (TypeError, ValueError):
+                value = default          # 库里是脏值就当没存过，别把练习页弄白屏
+        out[name] = {"min": lo, "max": hi, "value": _fmt_seconds(value)}
+    return out
+
+
+def overlap_default(user=None):
+    """听读写第一轮「边播边录」这个开关的用户默认值；没存过按以前的默认（开着）。"""
+    if not isinstance(user, dict):
+        return True
+    stored = user.get("overlap_record")
+    return True if stored is None else bool(stored)
 
 
 # 会话 params 里存的是毫秒（JS 那边只用毫秒），结果页要换回人能读的秒
@@ -382,20 +407,23 @@ def humanize_params(params):
 @app.route("/practice/read-translate")
 @login_required
 def practice_read_translate():
+    user = current_user()
     return render_template(
         "practice_read_translate.html",
-        defaults={"count": current_user()["default_count"]},
-        rhythm=rhythm_defaults(),
+        defaults={"count": user["default_count"]},
+        rhythm=rhythm_defaults(user),
     )
 
 
 @app.route("/practice/listen-spell")
 @login_required
 def practice_listen_spell():
+    user = current_user()
     return render_template(
         "practice_listen_spell.html",
-        defaults={"count": current_user()["default_count"]},
-        rhythm=rhythm_defaults(),
+        defaults={"count": user["default_count"]},
+        rhythm=rhythm_defaults(user),
+        overlap=overlap_default(user),
     )
 
 
@@ -410,13 +438,21 @@ def settings():
                 default_count=request.form.get("default_count"),
                 time_limit=request.form.get("time_limit"),
                 voice=request.form.get("voice"),
+                # 三段时长：和练习页用同一套 name，越界由 update_settings 夹回 config 的边界
+                round1_seconds=request.form.get("round1_seconds"),
+                round2_seconds=request.form.get("round2_seconds"),
+                round_gap_seconds=request.form.get("round_gap"),
+                # 复选框不勾就整个字段不提交，必须补一个 "0"，否则「关掉边播边录」存不下去
+                overlap_record=request.form.get("overlap_record", "0"),
             )
             message = "设置已保存"
         except auth.AuthError as exc:
             message = f"保存失败：{exc}"
         refresh_current_user()
     user = auth.get_user(current_user()["id"])
-    return render_template("settings.html", user=user, message=message)
+    return render_template("settings.html", user=user, message=message,
+                           rhythm=rhythm_defaults(user),
+                           overlap=overlap_default(user))
 
 
 @app.route("/account", methods=["GET", "POST"])
@@ -686,6 +722,7 @@ def api_me():
     user = current_user()
     if not user:
         return jsonify({"logged_in": False})
+    rhythm = rhythm_defaults(user)
     return jsonify({
         "logged_in": True,
         "username": user["username"],
@@ -693,7 +730,13 @@ def api_me():
         "settings": {
             "default_count": user["default_count"],
             "time_limit": user["time_limit"],
-            "voice": user["voice"],
+            "voice": user["voice"],       # 历史列：近似音现在每题随机抽男女声
+            # 看读译 / 听读写那四个走的是渲染练习页同一套函数（并且一样夹回边界），
+            # 这样「API 报的默认值」和「学生打开练习页看到的默认值」不可能对不上。
+            "round1_seconds": float(rhythm["round1"]["value"]),
+            "round2_seconds": float(rhythm["round2"]["value"]),
+            "round_gap_seconds": float(rhythm["gap"]["value"]),
+            "overlap_record": overlap_default(user),
         },
     })
 

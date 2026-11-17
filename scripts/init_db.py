@@ -46,7 +46,15 @@ CREATE TABLE IF NOT EXISTS users (
     nickname      TEXT,
     default_count INTEGER NOT NULL DEFAULT 20,   -- 默认练习题量
     time_limit    REAL    NOT NULL DEFAULT 1,    -- 近似音每题限时秒数
-    voice         TEXT    NOT NULL DEFAULT 'f',  -- f=女声 m=男声
+    voice         TEXT    NOT NULL DEFAULT 'f',  -- f=女声 m=男声（历史列，近似音已改为每题随机）
+    -- 看读译 / 听读写那三段时长 + 边播边录开关，存进账号当默认值（/settings 里改）。
+    -- 下面这几个 DEFAULT 只是「新注册的人没填过」时的初值，必须和 config.py 里
+    -- ROUND1_SECONDS / ROUND2_SECONDS / ROUND_GAP_SECONDS 的第三个数保持一致，
+    -- 真正的边界与夹取在 services/auth.update_settings 里做。
+    round1_seconds    REAL    NOT NULL DEFAULT 1.5,  -- 第一轮（朗读 / 跟读录音）秒数
+    round2_seconds    REAL    NOT NULL DEFAULT 5,    -- 第二轮（写译文 / 拼写）秒数
+    round_gap_seconds REAL    NOT NULL DEFAULT 0.2,  -- 题间停顿秒数
+    overlap_record    INTEGER NOT NULL DEFAULT 1,    -- 听读写第一轮边播边录
     created_at    TIMESTAMP DEFAULT (datetime('now','localtime'))
 );
 
@@ -762,6 +770,33 @@ def migrate_words_voice_columns(conn):
             print("已为 words 表补上 %s 列" % name)
 
 
+# users 表后来加的「练习默认参数」列：列名 → ALTER 时给的初值。
+# CREATE TABLE IF NOT EXISTS 对已经存在的表一个字段都不补，所以线上那个库
+# （2026-11-17 就有用户了）必须靠这里补，否则 app.rhythm_defaults() 读不到列、
+# 设置页一保存就报 no such column。初值和 config.py 里的默认值一致，
+# 也就是「补完列之后老用户的体验和以前完全一样」——除了第一轮从 1 秒变成 1.5 秒，
+# 那是这次有意改的。
+USER_RHYTHM_COLUMNS = (
+    ("round1_seconds", "REAL NOT NULL DEFAULT 1.5"),
+    ("round2_seconds", "REAL NOT NULL DEFAULT 5"),
+    ("round_gap_seconds", "REAL NOT NULL DEFAULT 0.2"),
+    ("overlap_record", "INTEGER NOT NULL DEFAULT 1"),
+)
+
+
+def migrate_users_rhythm_columns(conn):
+    """给老库的 users 表补上四个可保存的练习默认值列。"""
+    # 按列号取而不是按列名（row["name"]）：这个函数不该要求调用方先设
+    # conn.row_factory = sqlite3.Row —— init_db() 里设了，别处（比如校验脚本、
+    # 或者将来把它接到部署流程里）拿裸连接一调就会 TypeError: tuple indices ...。
+    # PRAGMA table_info 的第二列永远是列名，两种 row_factory 都成立。
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    for name, ddl in USER_RHYTHM_COLUMNS:
+        if name not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN %s %s" % (name, ddl))
+            print("已为 users 表补上 %s 列" % name)
+
+
 def init_db(reset=False):
     # 建库这一步也要 WAL：journal_mode 是写进库文件头的永久设置，
     # 在这里落一次，运行时（db.connect）只是每个连接再确认一遍。
@@ -775,6 +810,8 @@ def init_db(reset=False):
     conn.executescript(SCHEMA)
     # 老库里的 words 表没有性别分列的音频字段，补列要在扫描 Quiz3000 音频之前
     migrate_words_voice_columns(conn)
+    # users 表那四个「练习默认参数」列同理：老库只有 CREATE TABLE IF NOT EXISTS 挡着，不会补
+    migrate_users_rhythm_columns(conn)
 
     words = seed_words(conn)
     scan_vowel_audio(conn)
