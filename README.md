@@ -49,6 +49,9 @@ scripts/import_quiz3000.py
 scripts/sentence_texts.json
                       4A 整句文本（由语音转写脚本生成后人工校验，进版本库）
 scripts/*.js          前端脚本（由 /js/<name> 路由提供，只放行 .js）
+scripts/serve_https.py
+                      生成带本机 IP SAN 的自签证书，并用 HTTPS 起 Flask——
+                      手机要用浏览器录音就得走 https 或 localhost，见「移动端」一节
 templates/            Jinja2 模板
 static/css/style.css  自定义样式
 static/audio/vowel/   近似音单词音频，命名 n.m-word.f.wav / n.m-word.m.wav
@@ -67,8 +70,8 @@ data/recordings/      用户朗读录音（已 gitignore，不进版本库）
 | 模块 | 第一轮 | 第二轮 |
 |---|---|---|
 | 近似音区分 `/practice/vowel` | 屏幕标出 1 / 2 两个词，随机播放其中一个（单词练习播 3B 的单词，句子练习播 4A 的整句，选项都只给变化的那两个词） | 限时内点选项卡作答（电脑上也可以按键盘 `1` / `2`），默认 1 秒，音频播完才开始计时，判完立刻下一题 |
-| 看读译 `/practice/read-translate` | 单词展示一轮时长并录音（默认 1 秒） | 单词展示二轮时长，键入中文译文（任写一项即可，默认 5 秒） |
-| 听读写 `/practice/listen-spell` | 默认「边播边录」：单词音频和录音同一时刻开始，跟着标准音念；音频放完后再走满一轮时长，每词录「音频本身 + 一轮时长」（默认那 1 秒就是音频之后的尾巴）。关掉开关则回到先听后录 | 再播一次音频，二轮时长内键入拼写（默认 5 秒） |
+| 看读译 `/practice/read-translate` | 单词展示一轮时长并录音（默认 1.5 秒） | 单词展示二轮时长，键入中文译文（任写一项即可，默认 5 秒） |
+| 听读写 `/practice/listen-spell` | 默认「边播边录」：单词音频和录音同一时刻开始，跟着标准音念；音频放完后再走满一轮时长，每词录「音频本身 + 一轮时长」（默认那 1.5 秒就是音频之后的尾巴）。关掉开关则回到先听后录 | 再播一次音频，二轮时长内键入拼写（默认 5 秒） |
 
 看读译 / 听读写的单词音频每题随机播男声或女声（`words.audio_f` / `audio_m` 二选一），
 用户不能也不该去选发音人：练的是听出这个词，不是听惯某个人的音色。抽到的性别随题目
@@ -76,9 +79,14 @@ data/recordings/      用户朗读录音（已 gitignore，不进版本库）
 
 看读译 / 听读写页的「练习设置」里有三个时长输入框——第一轮、第二轮、题目之间的停顿——
 可以在开始前自己改，边界写在 `config.py` 的 `ROUND1_SECONDS` / `ROUND2_SECONDS` /
-`ROUND_GAP_SECONDS`（依次 0.3~20、1~60、0~3 秒，默认 1 / 5 / 0.2 就是以前写死的那三个值）。
+`ROUND_GAP_SECONDS`（依次 0.3~20、1~60、0~3 秒，默认 1.5 / 5 / 0.2）。
 点「开始练习」时读一次并夹到边界内，中途改框不影响正在跑的这轮；三段毫秒数会存进会话
 params，结果页标成「第一轮（秒） = 3」这样的中文徽章。
+
+这三个时长连同题量、听读写的「边播边录」开关都能在 **`/settings` 练习设置**里存进账号
+（`users.round1_seconds` / `round2_seconds` / `round_gap_seconds` / `overlap_record`），
+下次打开练习页就是自己习惯的那套；练习页上的框仍然可以临时改，不改就直接按保存的默认值跑。
+近似音那一栏存的是 `default_count` / `time_limit`，四个练习共用的题量也是同一个字段。
 
 听读写还多一个「第一轮边播边录」开关（`tworounds.js` 里的 `overlap`，默认开着）。开着时
 点「开始练习」就先 `Recorder.prime()` 申请一次麦克风，之后每题复用同一条音轨——
@@ -109,6 +117,33 @@ params，结果页标成「第一轮（秒） = 3」这样的中文徽章。
   元素，逐题 `new Audio()` 的话从第二题起就被当成自动播放拒掉，手机上等于全程静音。
 - 录音：`Recorder` 的麦克风流与 WAV 兜底用的 `AudioContext` 都是整场练习共用的，
   练习结束（或启动失败）时 `releaseStream()` 关掉，浏览器那个录音红点不会一直亮着。
+
+### 手机上想录音，必须用 https:// 或 localhost 打开
+
+浏览器只在「安全上下文」里开放 `getUserMedia`：协议是 `https://`，或者地址是环回
+（`http://localhost`、`http://127.0.0.1`）。用手机访问 `http://192.168.x.x:5000` 这类
+局域网地址时 `navigator.mediaDevices` 直接就是 `undefined`——症状正好是「页面都正常，
+只有录不了音」，跟移动端适配没关系。三条路子：
+
+```bash
+# 1）自签 HTTPS，安卓和 iOS 都能用（自动把本机所有网卡 IP 写进证书 SAN）
+venv\Scripts\python.exe scripts\serve_https.py            # 手机访问它打印出来的 https://IP:5000
+venv\Scripts\python.exe scripts\serve_https.py --regen    # 换了 WiFi、IP 变了就重签
+venv\Scripts\python.exe scripts\serve_https.py --no-run   # 只准备证书，先不启动
+
+# 2）安卓 + USB，连证书都不用：手机那边变成环回地址，浏览器认它是安全上下文
+adb reverse tcp:5000 tcp:5000      # 然后在手机 Chrome 里打开 http://localhost:5000
+
+# 3）要给一个班的人用：挂到真有证书的域名下（nginx + Let's Encrypt，或校内服务器）
+```
+
+自签证书第一次访问会警告「证书不受信任」，iOS 点「显示详细信息 → 访问此网站」、
+安卓 Chrome 点「高级 → 继续前往」就行：安全上下文只看协议是不是 https，不看证书是谁签的，
+所以点过警告之后麦克风权限照常弹。签发时三个坑写在 `scripts/serve_https.py` 里：
+有效期默认 800 天（iOS 直接拒收超过 825 天的证书）、SAN 里必须列 IP（浏览器早就不看 CN 了）、
+中文计算机名不塞进 DNS 项（不合规，严格的解析器可能整张证书都拒）。
+还要记得用系统 Safari 或 Chrome 打开，微信 / 钉钉的内置浏览器不放麦克风权限；
+Windows 第一次会问是否允许 Python 访问网络，勾「专用网络」，不然手机连不上。
 
 ## 音频来源优先级
 
