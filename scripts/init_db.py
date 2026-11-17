@@ -16,7 +16,17 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", "app.db")
+# init_db.py 是「python scripts/init_db.py」这样直接跑的，sys.path[0] 是 scripts/，
+# 所以要用根目录下的模块得先把根塞进去。
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from db import connect as connect_db, resolve_db_path  # noqa: E402
+
+# 库路径和 pragma 都从 db.py 拿，不要再在这里写死第二份 ——
+# 以前两边各写一份 BASE_DIR/data/app.db，结果 config.DATABASE_PATH 形同虚设，
+# 部署时改环境变量换不了库，还得连这个脚本一起改，很容易漏。
+DB_PATH = resolve_db_path()
 VOWEL_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "vowel")
 SENTENCE_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "sentence")
 WORD_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio", "word")
@@ -753,10 +763,10 @@ def migrate_words_voice_columns(conn):
 
 
 def init_db(reset=False):
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # 建库这一步也要 WAL：journal_mode 是写进库文件头的永久设置，
+    # 在这里落一次，运行时（db.connect）只是每个连接再确认一遍。
+    conn = connect_db(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
 
     if reset:
         print("--reset：删除旧表")

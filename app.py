@@ -8,6 +8,7 @@ import config
 from db import get_db, close_db
 from flask import (
     Flask,
+    abort,
     g,
     jsonify,
     redirect,
@@ -30,6 +31,12 @@ if not os.environ.get("SECRET_KEY"):
         "未设置 SECRET_KEY，已改用随机密钥；进程重启后所有登录状态会失效。"
     )
 
+# 上传体积上限由应用自己把住，不能只指望前置的 nginx client_max_body_size：
+# 换一台前面没有 nginx 的机器（本地调试、直接 gunicorn、以后换反代）就是裸奔，
+# 而一个 20MB 的录音包在 1 核机上足以把内存和磁盘一起顶穿。
+# 超限后 Werkzeug 在读取请求体时就抛 413，body 根本不会落地，见下面的 errorhandler。
+app.config["MAX_CONTENT_LENGTH"] = int(config.MAX_UPLOAD_MB * 1024 * 1024)
+
 RECORDING_EXTENSIONS = {"webm", "ogg", "wav", "mp4", "m4a", "mp3", "mpeg"}
 
 # 近似音两种题型走各自的出题函数，回包结构完全一样
@@ -44,6 +51,39 @@ RECORDING_NAME_RE = re.compile(r"^u(\d+)_[0-9a-f]{12}\.[A-Za-z0-9]{1,8}$")
 
 # ---------------------------------------------------------------- 工具
 
+def recording_dir():
+    """录音目录在文件系统上的绝对路径（RECORDING_DIR 相对/绝对都接受）。"""
+    raw = (config.RECORDING_DIR or "data/recordings").replace("\\", "/")
+    if os.path.isabs(raw):
+        return os.path.normpath(raw)
+    return os.path.normpath(os.path.join(BASE_DIR, raw))
+
+
+def recording_prefix():
+    """录音路径存进库、以及从库里比对时统一用这个前缀：永远相对项目根。
+
+    这是 RECORDING_DIR 那个坑的正解。以前四处直接拼 config.RECORDING_DIR，
+    一旦部署时填成绝对路径（/opt/english-practice/app/data/recordings），
+    库里就存成绝对路径，而 audio_url() 比对前会先 lstrip("/")，
+    前缀怎么都对不上，最后落到 `return "/" + rel` 那个兜底分支 ——
+    结果页的录音链接变成 /opt/english-practice/... 这种 404，
+    而且只在生产机上出现，本地永远测不出来。
+    """
+    target = recording_dir()
+    try:
+        rel = os.path.relpath(target, BASE_DIR)
+    except ValueError:      # Windows 上跨盘符时 relpath 会抛，退回原样
+        rel = target
+    return rel.replace("\\", "/").rstrip("/")
+
+
+def recording_owner(filename):
+    """从文件名里取出后端当初登记的归属 id；文件名不合规则返回 None。"""
+    name = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    match = RECORDING_NAME_RE.match(name)
+    return int(match.group(1)) if match else None
+
+
 def own_recording_path(rel_path, user_id):
     """只承认后端为当前用户生成的录音文件。
 
@@ -53,10 +93,9 @@ def own_recording_path(rel_path, user_id):
     if not rel_path:
         return None
     name = str(rel_path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-    match = RECORDING_NAME_RE.match(name)
-    if not match or int(match.group(1)) != user_id:
+    if recording_owner(name) != user_id:
         return None
-    return f"{config.RECORDING_DIR}/{name}"
+    return f"{recording_prefix()}/{name}"
 
 
 MISSING = object()
@@ -138,9 +177,9 @@ def audio_url(rel_path):
     rel = rel_path.replace("\\", "/").lstrip("/")
     if rel.startswith("static/"):
         return url_for("static", filename=rel[len("static/"):])
-    rec_prefix = config.RECORDING_DIR.replace("\\", "/").rstrip("/") + "/"
+    rec_prefix = recording_prefix() + "/"
     if rel.startswith(rec_prefix):
-        # 录音不在 static 下，必须走 /recordings/ 路由
+        # 录音不在 static 下，必须走 /recordings/ 路由（那里有归属校验）
         return url_for("recordings", filename=rel[len(rec_prefix):])
     return "/" + rel
 
@@ -168,6 +207,22 @@ def forbidden(e):
     return "没有权限访问", 403
 
 
+@app.errorhandler(413)
+def payload_too_large(e):
+    """超过 config.MAX_UPLOAD_MB 时，Werkzeug 在读请求体阶段就抛到这里。
+
+    回 JSON 而不是默认那张 HTML 错误页：前端这条链路全是 fetch，
+    拿到 HTML 只会显示「提交失败」，学生根本不知道是自己录音太长。
+    最常见的原因是 iOS Safari 走的是未压缩 WAV 兜底路径（44.1kHz 16bit，
+    一分钟就是 10MB 上下），一题读久了就会顶到上限。
+    """
+    limit = int(config.MAX_UPLOAD_MB)
+    detail = f"上传内容超过 {limit}MB，这一题的录音太长了，请重新录短一些"
+    if request.path.startswith("/api/"):
+        return jsonify({"error": detail}), 413
+    return detail, 413
+
+
 # ---------------------------------------------------------------- 静态资源
 
 @app.route("/js/<path:filename>")
@@ -180,8 +235,23 @@ def scripts_js(filename):
 
 @app.route("/recordings/<path:filename>")
 def recordings(filename):
-    """用户上传的朗读音频，不放在 static 下，避免被当成源码目录。"""
-    return send_from_directory(os.path.join(BASE_DIR, config.RECORDING_DIR), filename)
+    """用户上传的朗读音频，不放在 static 下，避免被当成源码目录。
+
+    这里必须做归属校验。以前是裸 `send_from_directory`，防线只有「文件名里那
+    12 位十六进制猜不到」—— 可 uuid 不是机密：结果页的 HTML 里就写着完整 URL，
+    任何人拿到链接（截图、分享、浏览器历史、访问日志）就能永久回放别人的朗读，
+    而录音里往往有学生自报家门。写入侧 own_recording_path() 早就在比归属了，
+    读取侧不比对等于是半个漏洞。
+
+    不是本人一律 404，不用 403 —— 403 等于承认「这个文件确实存在」。
+    """
+    name = filename.replace("\\", "/")
+    if "/" in name:                       # 录音是平铺的，带子目录的都不是我们发的
+        abort(404)
+    user = current_user()
+    if not user or recording_owner(name) != user["id"]:
+        abort(404)
+    return send_from_directory(recording_dir(), name)
 
 
 # ---------------------------------------------------------------- 页面路由
@@ -200,6 +270,11 @@ def login():
         password = request.form.get("password", "")
         try:
             user = auth.verify_login(username, password)
+        except auth.HashQueueFull:
+            # 哈希闸门排不下 = 登录的人实在太多。快速回一句话让人重试，
+            # 比让请求挂在那儿、最后被 nginx 的 60 秒超时切成 504 好得多。
+            return render_template(
+                "login.html", error="同时登录的人有点多，请过几秒再试一次"), 503
         except auth.AuthError as exc:
             return render_template("login.html", error=str(exc)), 401
         session["user_id"] = user["id"]
@@ -220,6 +295,10 @@ def register():
                                    username=username, nickname=nickname), 400
         try:
             user = auth.register(username, password, nickname)
+        except auth.HashQueueFull:
+            return render_template("register.html",
+                                   error="同时注册的人有点多，请过几秒再试一次",
+                                   username=username, nickname=nickname), 503
         except auth.AuthError as exc:
             return render_template("register.html", error=str(exc),
                                    username=username, nickname=nickname), 400
@@ -361,6 +440,10 @@ def account():
                 error = "未知操作"
         except auth.AuthError as exc:
             error = str(exc)
+        except auth.HashQueueFull:
+            # 哈希闸门（config.MAX_CONCURRENT_HASHES）排队超时，不是用户输错了什么，
+            # 措辞别和「原密码不正确」混在一起，免得人去反复试密码。
+            error = "同时操作的人有点多，请过几秒再试一次"
         refresh_current_user()
 
     user = auth.get_user(current_user()["id"])
@@ -591,10 +674,10 @@ def api_upload_recording():
     if ext not in RECORDING_EXTENSIONS:
         ext = "webm"
 
-    rel_dir = config.RECORDING_DIR
-    os.makedirs(os.path.join(BASE_DIR, rel_dir), exist_ok=True)
+    rel_dir = recording_prefix()
+    os.makedirs(recording_dir(), exist_ok=True)
     name = f"u{current_user()['id']}_{uuid.uuid4().hex[:12]}.{ext}"
-    file.save(os.path.join(BASE_DIR, rel_dir, name))
+    file.save(os.path.join(recording_dir(), name))
     return jsonify({"path": f"{rel_dir}/{name}", "url": url_for("recordings", filename=name)})
 
 
