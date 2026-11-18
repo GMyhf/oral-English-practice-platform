@@ -1,0 +1,45 @@
+# /etc/english-practice/gunicorn.conf.py
+# Gunicorn 生产配置，用 `gunicorn --config` 显式加载（不靠环境变量，少一类「本地能跑线上不行」）。
+#
+# 这台机 1 核 / 764MB，所以目标不是榨性能，而是「别被自己的并发拖垮」：
+# worker 开多了光是 Python 导入就把内存吃光；一个请求被音频上传占住也只是慢一点，
+# 比整机 OOM 好得多。
+#
+# worker_class 用 gthread（gunicorn 自带，无额外依赖）：本项目 80% 的时间在
+# 「读磁盘上的 mp3/wav 再发给客户端」，是 IO 等待型负载，一个线程发音频时
+# 另一个线程可以同时处理练习提交。不用 gevent —— 它要 monkey_patch，
+# 而本项目的 sqlite 连接是「每个请求一个」（db.py 用 flask.g），
+# 换成协程后这套 per-request 语义容易变成隐性 bug，收益也不大。
+
+bind = "127.0.0.1:8000"      # 只回环监听，防火墙不开 8000，外部一律走 nginx
+workers = 2                  # 1 核开 2 个足够；每多一个 worker 约 +90MB 常驻
+worker_class = "gthread"
+threads = 4                  # 只在 gthread 下生效：2 x 4 = 8 条并发处理线
+                             # 2026-11-17 之前这个数字同时是「最多几个人能同时算密码」的上限：
+                             # werkzeug 默认 scrypt:32768:8:1 一次 34MB，当时 threads=8 就是
+                             # 16 条线一起哈希 ≈ 512MB，而整机只有 764MB —— 实测 12 人同时点
+                             # 登录就会把服务器拖进直接回收死循环（响应 60s+ 超时，且不自愈，
+                             # 必须人工 restart）。
+                             # 现在那件事由 services/auth.py 的 MAX_CONCURRENT_HASHES 管
+                             #（每进程 2、整机 2×2=4 个，16384 下 4×18MB ≈ 72MB），所以这里
+                             # 可以按吞吐定，不用再替哈希成本买单。
+                             # 轻负载时排在哈希闸门上的请求最多等 1-2 轮 ≈ 0.15 秒（单轮 72ms）；
+                             # 全班同一秒点登录那种洪峰等的就不是闸门而是整池排队（240 人 ≈ 17 秒），
+                             # 那个上限在 HASH_QUEUE_TIMEOUT 里，见 config.py。
+
+preload_app = True           # fork 前导入一次，多个 worker 共享只读内存页（省内存）
+                             # 本项目没有模块级的数据库句柄，fork 安全
+
+timeout = 60                 # 一次提交要写 100 条作答 + 上传录音，30 秒偏紧
+graceful_timeout = 30
+keepalive = 5
+worker_connections = 64      # gthread 默认 1000，太高：连接全堆在 worker 里排队，
+                             # 前端等到超时也不肯回 503。64 = 8 条线 × 8 倍排队，够用又不失控
+
+max_requests = 2000          # 跑够请求数就轮换 worker，兜住内存缓慢增长
+max_requests_jitter = 400    # 错开轮换时间，避免几个 worker 同时重启造成抖动
+
+accesslog = "-"              # 走标准输出，由 journald 收：journalctl -u english-practice
+errorlog = "-"
+loglevel = "info"
+proc_name = "english-practice"

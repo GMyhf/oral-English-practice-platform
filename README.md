@@ -36,6 +36,13 @@ python scripts/manage_invite.py add            # 造一个码，注册页照着�
 set REGISTER_MODE=open && python app.py        # Windows；本地开发直接敞开
 ```
 
+## 生产部署
+
+要把这个平台部署到服务器供一个班（约 240 人）同时使用，请看 [`docs/deployment.md`](docs/deployment.md)。
+那里覆盖 gunicorn 配置、systemd 单元、nginx 反向代理、证书配置、内存与并发调优、维护操作与故障排查。
+
+`deploy/` 目录下有所有生产配置的模板（`*.example`），复制后替换占位符即可。
+
 ## 目录结构
 
 ```

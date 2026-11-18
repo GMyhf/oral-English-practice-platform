@@ -1,0 +1,17 @@
+# 这台仓库是在 Windows 上写的，而 deploy/ 里那些模板是要 cp 到 Linux 服务器上
+# 直接给 systemd / nginx / gunicorn 读的。CRLF 的换行在这三处都会出事：
+#   - systemd 单元里 ExecStart 行尾带 \r → 命令找不到（"No such file or directory"）
+#   - nginx 配置里值带 \r → `server_name example.com\r` 匹配不上，报错还看不出来
+#   - gunicorn 的 .py 配置带 \r 反而没事（Python 认），但和前两份不一致更迷惑
+# 所以对「会被整份复制到服务器」的文件一律钉成 LF，别让 core.autocrlf 决定。
+deploy/*.example text eol=lf
+docs/*.md text eol=lf
+
+# 源码按平台默认（Windows 上签出是 CRLF 也能跑，Python 两种都吃）
+*.py text
+*.js text
+*.html text
+*.css text
+*.json text
+*.md text
+*.sh text eol=lf

@@ -1,0 +1,96 @@
+# /etc/nginx/conf.d/english-practice.conf
+# 唯一启用的站点。80 只做 ACME 与跳转，真实流量全部走 443。
+#
+# 部署前需要替换的占位符：
+#   {{DOMAIN}}        你的域名，如 example.com
+#   {{IP_V4}}         服务器的 IPv4 地址，如 10.0.0.1
+#   {{IP_V6}}         服务器的 IPv6 地址，如 2001:db8::1（没有就删掉相关行）
+#
+# 这一版为什么长这样（前因后果，别再退回去）：
+#   2026-11-17 白天用的是自签证书（方案 A），SAN 里把 IPv4 / IPv6 字面量 / 域名都列上了。
+#   2026-11-17 23:29（北京时间 = 15:29 UTC）用户自己用 certbot 的 **dns-01** 给
+#     qiyiguo.localhost.cc 签到了**真的 Let's Encrypt 证书**（ECDSA，到期 2027-02-15）。
+#   11-18 00:37 换上一份新的 41 行配置。那次替换把这份文件里几个关键设置整段弄丢了，
+#     并且把 /static 的 alias 写成 /opt/english-practice/static/（少一层 app/）。
+#   直接后果就是他报的两条：style.css 与全部音频 404 → 页面没样式、练习不能播放；
+#     顺带录音上传上限退回默认 1m（这条还没人看见，但一定会撞到）。
+#   nginx error log 里全是
+#     open() "/opt/english-practice/static/css/style.css" failed (2: No such file or directory)
+#   —— 是路径不存在，不是 SELinux 拒绝（那种报 (13: Permission denied)）。
+#
+# 现在的结构：
+#   - 域名块用 LE 真证书：浏览器不再弹「不受信任」，麦克风授权链路干净。
+#   - 裸 IP 与 IPv6 字面量落到 default_server 块，继续用那张自签证书。
+#     这一块**必须留着**：LE 证书的 SAN 里只有域名，IP 请求撞上它就变成「主机名不匹配」，
+#     而 iOS Safari 对名称不匹配是直接拒连、不给「继续访问」按钮 —— 等于在 A 记录补上之前
+#     把只会敲 IP 的校内 IPv4 用户全关在门外。
+#   - 两个 443 块的站点内容完全一样，抽进 /etc/nginx/conf.d/english-practice-app.loc
+#     用 include 引 —— 改一处两边都改到，不会再复制出第二份漂移。
+#     文件名故意不叫 *.conf：nginx.conf 里是 `include /etc/nginx/conf.d/*.conf;`（http 层），
+#     叫 .conf 会被当成一个独立站点在 http 上下文里再加载一次，nginx -t 当场报错。
+#
+# 有意不加的两条：
+#   HSTS —— 加上就把 http 退路永久焊死；现在域名块与自签块共用同一个入口地址集合，
+#          某台设备被记成强制 https 之后，换证书或回滚时没有任何回旋。
+#   OCSP stapling —— 自签那块没有可信链可 stap；域名块以后要加再说。
+
+# ---------------------------------------------------------------- 80：ACME + 跳转
+server {
+    listen      80;
+    listen      [::]:80;
+    server_name {{DOMAIN}} {{IP_V4}} {{IP_V6}};
+
+    access_log /var/log/nginx/english-practice.access.log;
+
+    # 这张 LE 证书是 dns-01 签的，用不到这条路径；留着有两个理由：
+    #   1) 以后若改成 http-01 自动续期（那要有公网入站才行），没有它直接失败；
+    #   2) 它必须排在 301 之前 —— Let's Encrypt 跟跳转时会落到 443，而这边 443 没有 token 路径。
+    # 目录 /var/www/certbot 已存在，且 restorecon 成 httpd_sys_content_t。
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # 301 而非 302：浏览器会把 https 记成永久地址，学生以后再敲 http 直接就过去了。
+    # 代价是调试期临时想退回 http 时浏览器会 stubbornly 跳回 https —— 清站点缓存或开无痕。
+    # $host 对 IPv6 字面量会保留方括号（实测 Host: [2001:da8::…] → Location: https://[2001:da8::…]/help），
+    # 所以这条跳转对三种入口都是对的，不用改成 $scheme://$server_name。
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ---------------------------------------------------------------- 443：域名（真证书）
+server {
+    listen      443 ssl http2;
+    listen      [::]:443 ssl http2;
+    server_name {{DOMAIN}};
+
+    ssl_certificate         /etc/letsencrypt/live/{{DOMAIN}}/fullchain.pem;
+    ssl_certificate_key     /etc/letsencrypt/live/{{DOMAIN}}/privkey.pem;
+    ssl_protocols           TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache       shared:SSL:4m;   # 1 核机上省掉重复握手的全套非对称运算
+    ssl_session_timeout     1h;
+
+    include /etc/nginx/conf.d/english-practice-app.loc;
+}
+
+# ---------------------------------------------------------------- 443：IP / IPv6 字面量（自签，兜底）
+# default_server 是必要的：Host 头没匹配上任何名字的请求（直接敲 IP、探针脚本、扫描器、监控）
+# 都得有地方接，否则才会真的落到 Rocky 自带那个 /usr/share/nginx/html 站点上去。
+server {
+    listen      443 ssl http2 default_server;
+    listen      [::]:443 ssl http2 default_server;
+    server_name {{IP_V4}} {{IP_V6}} _;
+
+    # 自签证书：SAN 含 IPv4 + IPv6 + 域名，notAfter 2029-01-25。
+    # 等 A 记录加上、确认没人再敲 IP 之后，才可以考虑删掉这一块和那张自签证书。
+    ssl_certificate         /etc/pki/tls/certs/english-practice.crt;
+    ssl_certificate_key     /etc/pki/tls/private/english-practice.key;
+    ssl_protocols           TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache       shared:SSL:4m;
+    ssl_session_timeout     1h;
+
+    include /etc/nginx/conf.d/english-practice-app.loc;
+}

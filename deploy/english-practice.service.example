@@ -1,0 +1,67 @@
+# /etc/systemd/system/english-practice.service
+# systemd 单元文件。复制后执行：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now english-practice.service
+#
+# 前提：
+#   - 已创建 englishapp 用户与组（useradd -r -s /sbin/nologin englishapp）
+#   - 代码部署在 /opt/english-practice/app
+#   - venv 在 /opt/english-practice/venv
+#   - 配置文件在 /etc/english-practice/{gunicorn.conf.py,env}
+
+[Unit]
+Description=英语词汇发音练习平台 (Flask + Gunicorn)
+Documentation=file:///opt/english-practice/app/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=exec：execve 成功才算启动完成，比 simple 少一类「进程起来了但其实立刻退了」的误报
+Type=exec
+User=englishapp
+Group=englishapp
+WorkingDirectory=/opt/english-practice/app
+EnvironmentFile=/etc/english-practice/env
+ExecStart=/opt/english-practice/venv/bin/gunicorn --config /etc/english-practice/gunicorn.conf.py app:app
+
+Restart=always
+RestartSec=3
+# gunicorn 收到 SIGTERM 走优雅退出，留足时间让正在传的音频收尾
+TimeoutStopSec=30
+
+# 加固：/usr /boot /etc 只读，进程不能提权，/tmp 私有。
+#
+# 为什么是 full 而不是 strict —— 这是实测出来的，不是抄来的：
+# strict 会把整盘挂成只读，可写目录只能靠 ReadWritePaths 逐条 bind 回来，
+# 而 bind 的源路径必须在建立命名空间时就存在，否则服务以
+#   status=226/NAMESPACE "Failed to set up mount namespacing: .../app/data"
+# 直接起不来。本项目的 data/ 在 .gitignore 里（app.db 与用户录音都不进版本库），
+# git clone 完的那个瞬间 app/data 是不存在的 —— 用 strict 就会在部署当天炸。
+# full 已经把系统目录和 /etc 锁住，/opt 留给应用自己读写，风险收益比更合适。
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+UMask=0027
+
+# 1.1 万个音频文件 + 几百个并发连接的 socket，默认 1024 的文件描述符上限一定会先撑不住
+LimitNOFILE=65536
+
+# 内存两道闸门，数值都来自实测，不是拍脑袋（空闲时整个 cgroup 58MB）：
+#   MemoryHigh=384M：越过这条线内核才开始主动回收。8 条处理线同时算密码
+#     （scrypt 一次 32MB ≈ 256MB + 常驻）刚好还在线下，正常最重的情况够不着。
+#   MemoryMax=512M：硬上限。这一行是后来加回来的 —— 原先只设 High 不设 Max，
+#     12 个人同时点登录时 cgroup 一路涨到 405MB、memory.events 的 high 计数
+#     打到 90398 次、整机 available 掉到 121MB，所有工作线程卡在直接回收里，
+#     nginx 只能回 504，而且负载退不掉、必须人工 restart 才恢复。
+#     有硬上限（配合新建的 2G swap）之后，最坏情况是这个服务被 OOM 杀掉再自动
+#     拉起（Restart=always，约 3 秒），而不是整台机一起躺下。
+#
+# 如果你的机器内存更大（比如 4GB+），可以按比例放宽：
+#   MemoryHigh=1G
+#   MemoryMax=2G
+MemoryHigh=384M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,61 @@
+# /etc/nginx/conf.d/english-practice-app.loc
+# 站点内容本体，被 conf.d/english-practice.conf 里那两个 443 server 块 include：
+#   - server_name {{DOMAIN}}            → Let's Encrypt 真证书
+#   - default_server（裸 IP / IPv6 字面量 / 其它） → 自签证书
+# 两边只有证书不同，其余完全一样，所以抽成一份。**改这里要记得 nginx -T 里两个块都会变。**
+# 文件名故意不是 *.conf，否则会被 nginx.conf 的 `include /etc/nginx/conf.d/*.conf;`
+# 当成独立站点在 http 上下文里再加载一次（nginx -t 会直接报错）。
+#
+# 部署前需要替换的占位符：
+#   {{DEPLOY_DIR}}   代码部署目录，如 /opt/english-practice/app
+
+access_log /var/log/nginx/english-practice.access.log;
+error_log  /var/log/nginx/english-practice.error.log warn;
+
+# 学生整场练习的录音要一次性打包上传，nginx 默认的 1m 会把长会话挡成 413。
+# 2026-11-18 那次配置替换就是把它弄丢了 —— 这条不属于「样式问题」，症状要过一阵才出现，
+# 别等学生反馈才发现。
+client_max_body_size 20m;
+
+# ---- 静态资源与音频：nginx 直接读盘发送，不进 Python ----
+# 词库一共 11396 个音频、273MB。让 1 核机器上的 gunicorn 逐块转发音频是最亏的用法，
+# nginx 的 sendfile + Range 支持本来就是为这件事准备的。
+#
+# ⚠️ alias 必须是 {{DEPLOY_DIR}}/static/ —— 部署目录是 {{DEPLOY_DIR}}
+# （git 工作树就在 app 这层），少写一层就是全站 404：
+# style.css 没了 → 近似音区那些 .option-chip 卡片退回浏览器默认按钮外观；
+# /static/audio/**.mp3 没了 → 听写/阅读练习点播放没声音。两条都是「网站上了但不好用」，
+# 而且 Flask 自己出 /static 是 200，所以只在走 nginx 直出这条路上才暴露。
+location /static/ {
+    alias {{DEPLOY_DIR}}/static/;
+    try_files $uri =404;
+    expires 7d;
+    # 换掉某个词的录音、或改了 style.css 之后，学生浏览器还会拿 7 天旧文件；
+    # 调试期把这行注释掉、改用上一行 expires -1，改完记得硬刷新（Ctrl+F5）。
+}
+
+# ---- 其余全部转给后端 ----
+# /js/*.js 由 app.py 的 scripts_js 路由提供，它只放行 .js —— 不要在这里 alias scripts/，
+# 否则 scripts/*.py 与 scripts/*.json 会变成任何人可下载的公开文件。
+# /recordings/* 也留在这里：路径里带的是用户 id，交给 Flask 处理才有做归属校验的机会。
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection       "";
+    proxy_set_header Host             $host;
+    proxy_set_header X-Real-IP        $remote_addr;
+    proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+    # 这一行决定 Flask 侧看到的 scheme，进而决定 url_for(..., _scheme) 与
+    # 「浏览器是不是安全上下文（麦克风权限）」，别漏。
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout    60s;
+    proxy_send_timeout    60s;
+}
+
+# ---- 文本资源压缩；音频已经压过（mp3）或不值得压（wav），不在 gzip_types 里 ----
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_comp_level 4;
+gzip_types text/plain text/css application/javascript application/json image/svg+xml;
