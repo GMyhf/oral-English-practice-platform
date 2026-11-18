@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}本站不需要登录 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>本站当前运行在「本地模式」</h1>
+  <p class="mb-0 opacity-75">所以这里没有登录、注册，也没有账号</p>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <p class="mb-3">直接<a href="{{ url_for('practice') }}">开始练习</a>就行，不用填任何身份信息。
+      练习记录和你的朗读录音都存在<strong>这台设备的浏览器里</strong>：</p>
+    <ul class="mb-3">
+      <li>服务器上没有你的账号，也没有你的成绩和音频；</li>
+      <li>换一台设备、换一个浏览器、或者用无痕窗口，看到的都是空记录；</li>
+      <li>浏览器的「清除浏览数据」会把记录删掉，<strong>服务器那边没有备份可以找回</strong>。</li>
+    </ul>
+    <p class="text-muted small mb-3">
+      所以请用<a href="{{ url_for('account') }}">我的数据</a>页：定期导出备份、申请持久化存储（不让浏览器自动清）。
+    </p>
+    <a href="{{ url_for('practice') }}" class="btn btn-primary"><i class="bi bi-play-fill me-2"></i>去练习</a>
+    <a href="{{ url_for('account') }}" class="btn btn-outline-secondary">我的数据</a>
+    <a href="{{ url_for('help_page') }}" class="btn btn-outline-secondary">帮助</a>
+  </div>
+</div>
+
+<div class="alert alert-secondary py-2 small">
+  <i class="bi bi-gear me-1"></i>
+  老师或管理员想换成「要登录、成绩存服务器」那种模式：把环境变量
+  <code>APP_MODE=server</code> 写进部署的环境文件再重启服务，两种模式的区别见
+  <code>docs/deployment.md</code>。
+</div>
+{% endblock %}

@@ -2,7 +2,9 @@
    流程按设计文档：屏幕标出两个选项 1/2 → 随机播放其中一个 → 限时内点卡片（或按键盘 1/2）
    作答 → 立刻给出对错并进入下一题；结束后一次性提交全部作答，跳转到结果页逐题回看。
    单词练习播的是 3B 的单词音频，句子练习播的是 4A 的整句，选项只有句中变化的那两个词。
-   作答入口有两个：卡片本身是按钮，手机上点一下就算选；键盘 1/2 留给用电脑的人。 */
+   作答入口有两个：卡片本身是按钮，手机上点一下就算选；键盘 1/2 留给用电脑的人。
+   成绩落库走 PracticeStore：服务器模式提交给后端，本地模式写本机 IndexedDB，
+   这个脚本本身不判断模式（模式判断集中在 practice-store.js 那一层）。 */
 (() => {
   const $ = id => document.getElementById(id);
 
@@ -62,10 +64,9 @@
     const params = readParams();
     $("btn-start").disabled = true;
     try {
-      const sess = await Common.api("/api/practice/session", {
-        practice_type: "vowel", params
-      });
-      sessionId = sess.session_id;
+      // 会话落在哪儿由 PracticeStore 决定：服务器模式写库，本地模式写 IndexedDB
+      const sess = await PracticeStore.createSession("vowel", params);
+      sessionId = sess.sessionId;
 
       const data = await Common.api("/api/vowel/questions", params);
       questions = data.questions;
@@ -261,10 +262,8 @@
     $("stage").classList.add("d-none");
     $("finishing").classList.remove("d-none");
     try {
-      const res = await Common.api("/api/practice/finish", {
-        session_id: sessionId, records
-      });
-      location.href = res.result_url;
+      const res = await PracticeStore.finish(sessionId, records);
+      location.href = res.resultUrl;
     } catch (err) {
       Common.toast(`保存失败：${err.message}`, "danger");
       $("finishing").classList.add("d-none");

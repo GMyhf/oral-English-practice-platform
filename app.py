@@ -135,9 +135,58 @@ def refresh_current_user():
     return current_user()
 
 
+# ------------------------------------------------------------------ 运行模式
+# config.APP_MODE 决定这台站是「要登录、数据进服务器」还是「不登录、数据留本机」。
+# 后端只在这里判断一次，其他地方一律调 is_local() / practice_profile()，
+# 免得「哪些路由认本地模式」散落在十几个函数里各写各的口径。
+
+def is_local():
+    """当前是否跑在本地模式（不登录，练习数据全在浏览器里）。"""
+    return config.APP_MODE == "local"
+
+
+def local_profile():
+    """本地模式下代替账号记录的那份合成档案。
+
+    练习页的输入框默认值、rhythm_defaults() / overlap_default() 都按 dict 取值，
+    这里给一份只用 config 默认值的 dict，它们就会自动退回「没人设置过」的那条路径
+    （rhythm_defaults 里 stored is None → 用 config 的默认），不需要再加分支。
+
+    id 是 None：真有人拿它去写库就是 bug，所以写库接口在 local 模式下根本不会被调用
+    （见 api_create_session 的闸门），而不是靠这个 None 兜底。
+    """
+    return {
+        "id": None,
+        "username": "guest",
+        "nickname": "",
+        "created_at": None,
+        "default_count": config.DEFAULT_QUESTION_COUNT,
+        "time_limit": config.DEFAULT_TIME_LIMIT,
+        "voice": None,
+    }
+
+
+def practice_profile():
+    """出题和练习页默认值该用谁的设置：登录用户用他的账号，本地模式用 config 默认。
+
+    注意这**不是**「当前用户」：只有两处非用不可的地方用它（练习页默认值、
+    近似音每题限时）。凡是涉及归属、写库、鉴权的地方仍然只看 current_user()。
+    """
+    if is_local():
+        return local_profile()
+    return current_user()
+
+
 @app.context_processor
 def inject_user():
-    return {"current_user": current_user(), "nav_active": request.endpoint}
+    # data_mode / local_mode 是给模板切文案和导航用的：本地模式的导航栏不该出现
+    # 「登录 / 注册」，也不该出现「账号」这种会让人以为数据存到服务器上的词。
+    return {
+        "current_user": current_user(),
+        "nav_active": request.endpoint,
+        "data_mode": config.APP_MODE,
+        "local_mode": is_local(),
+    }
 
 
 def safe_next(target):
@@ -150,7 +199,9 @@ def safe_next(target):
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if current_user():
+        # 本地模式：练习页不需要身份，服务器也没有可校验的会话。
+        # 这里放行只是「不必登录就能进页面」，写库的接口另有闸门（见 api_create_session）。
+        if is_local() or current_user():
             return view(*args, **kwargs)
         if request.path.startswith("/api/"):
             return jsonify({"error": "请先登录"}), 401
@@ -163,11 +214,27 @@ def api_login_required(view):
     """接口专用：只接受 session 登录，未登录返回 401 JSON。"""
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not current_user():
-            return jsonify({"error": "请先登录"}), 401
-        return view(*args, **kwargs)
+        if is_local() or current_user():
+            return view(*args, **kwargs)
+        return jsonify({"error": "请先登录"}), 401
 
     return wrapped
+
+
+def local_mode_refuse(what):
+    """本地模式下把写数据的接口挡回去。
+
+    正常的前端在本地模式根本不会发这些请求（PracticeStore 走 IndexedDB），
+    来的是没更新的旧 JS、别的站点，或者有人手动 curl。与其默默写进一张没有
+    归属的表（user_id 为 NULL，账号页查询按 user_id 过滤，等于永远看不见的数据垃圾），
+    不如直接拒绝并说明原因。出题用的只读接口不受影响。
+    """
+    return jsonify({
+        "error": "本站当前运行在本地模式：练习记录和录音只存在你的设备里，"
+                 "服务器不接收也不保存。请刷新页面重新加载脚本。",
+        "mode": "local",
+        "unsupported": what,
+    }), 409
 
 
 def audio_url(rel_path):
@@ -265,6 +332,9 @@ def index():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if is_local():
+        # 旧书签 / 导航缓存还会指到 /login：给一句人话说明，而不是让他对着登录框猜
+        return mode_notice()
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -285,6 +355,8 @@ def login():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    if is_local():
+        return mode_notice()
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -319,8 +391,17 @@ def register():
 
 @app.route("/logout", methods=["POST", "GET"])
 def logout():
+    if is_local():
+        # 本地模式没有会话可退出。这里也不能调 session.pop 之后 redirect 到首页——
+        # 首页在本地模式下照样能练，来回跳只会让人以为「退出去又自动登进来了」。
+        return mode_notice()
     session.pop("user_id", None)
     return redirect(url_for("index"))
+
+
+def mode_notice():
+    """本地模式下替代登录 / 注册 / 退出这三个入口的说明页。"""
+    return render_template("mode_notice.html"), 200
 
 
 @app.route("/practice", endpoint="practice")
@@ -337,8 +418,8 @@ def practice_vowel():
         vowel_groups=practice.list_vowel_groups(),
         modes=practice.VOWEL_MODES,
         defaults={
-            "count": current_user()["default_count"],
-            "time_limit": current_user()["time_limit"],
+            "count": practice_profile()["default_count"],
+            "time_limit": practice_profile()["time_limit"],
             # 没有 voice：近似音每题随机抽男声/女声，账号里的旧设置不再参与出题
         },
     )
@@ -416,7 +497,7 @@ def humanize_params(params):
 @app.route("/practice/read-translate")
 @login_required
 def practice_read_translate():
-    user = current_user()
+    user = practice_profile()
     return render_template(
         "practice_read_translate.html",
         defaults={"count": user["default_count"]},
@@ -427,7 +508,7 @@ def practice_read_translate():
 @app.route("/practice/listen-spell")
 @login_required
 def practice_listen_spell():
-    user = current_user()
+    user = practice_profile()
     return render_template(
         "practice_listen_spell.html",
         defaults={"count": user["default_count"]},
@@ -439,6 +520,17 @@ def practice_listen_spell():
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
+    if is_local():
+        # 本地模式没有账号可写：这张表单由 scripts/practice-store.js 的 LocalSettings 接管，
+        # 存进本机 localStorage。
+        # 服务器只负责把表单和边界画出来（值来自 config 默认），而且这里任何情况下都不碰数据库
+        # —— 万一有人绕过 JS 直接 POST 到 /settings，也只会重新拿到同一张空表单。
+        # 用同一份 settings.html 而不是另写一个模板：字段名和边界只有一份，
+        # 以后加一项不会出现「服务器模式能存、本地模式忘加」这种走偏。
+        return render_template("settings.html", user=local_profile(), message=None,
+                               rhythm=rhythm_defaults(None),
+                               overlap=overlap_default(None))
+
     message = None
     if request.method == "POST":
         try:
@@ -467,6 +559,11 @@ def settings():
 @app.route("/account", methods=["GET", "POST"])
 @login_required
 def account():
+    if is_local():
+        # 本地模式没有账号，这一栏改叫「我的数据」：列出本机存过的练习、导出导入、清空。
+        # 列表内容由 scripts/local-data.js 从 IndexedDB 现取，服务器一份数据都不掌握。
+        return render_template("local_data.html")
+
     message = None
     error = None
     if request.method == "POST":
@@ -512,6 +609,12 @@ def help_page():
 @app.route("/result/<int:session_id>")
 @login_required
 def result_page(session_id):
+    if is_local():
+        # 本地模式的结果页只是一张空壳：题目、作答、录音全在浏览器 IndexedDB 里，
+        # 由 scripts/local-result.js 按 URL 里这个 id 取出来画。
+        # 这里不查库，也就保证了一个旧的服务器会话 id 不会在别人机器上翻出内容。
+        return render_template("result_local.html", session_id=session_id)
+
     row = get_db().execute(
         "SELECT * FROM practice_sessions WHERE id = ? AND user_id = ?",
         (session_id, current_user()["id"]),
@@ -572,7 +675,7 @@ def api_vowel_questions():
     return jsonify({
         "questions": questions,
         "mode": mode,
-        "time_limit": current_user()["time_limit"],
+        "time_limit": practice_profile()["time_limit"],
         "requested": requested,
         "actual": len(questions),
     })
@@ -610,6 +713,8 @@ def api_words():
 @app.post("/api/practice/session")
 @api_login_required
 def api_create_session():
+    if is_local():
+        return local_mode_refuse("practice_session")
     data = json_body()
     ptype = data.get("practice_type")
     if ptype not in practice.PRACTICE_TYPES:
@@ -632,6 +737,8 @@ def api_create_session():
 @api_login_required
 def api_finish_session():
     """练习结束时一次性提交全部作答记录，题目信息和音频路径都存进 question_json 供回看。"""
+    if is_local():
+        return local_mode_refuse("practice_finish")
     data = json_body()
     session_id = data.get("session_id")
     records = data.get("records")
@@ -711,6 +818,10 @@ def api_finish_session():
 @api_login_required
 def api_upload_recording():
     """保存用户朗读录音，返回可回放的 URL。"""
+    if is_local():
+        # 本地模式的录音进的是 IndexedDB（见 scripts/local-store.js），
+        # 不写服务器的 data/recordings/：既省磁盘，也保证「这台机子上没有别人的声音」。
+        return local_mode_refuse("recording")
     file = request.files.get("audio")
     if not file or not file.filename:
         return jsonify({"error": "没有收到音频"}), 400
@@ -726,27 +837,43 @@ def api_upload_recording():
     return jsonify({"path": f"{rel_dir}/{name}", "url": url_for("recordings", filename=name)})
 
 
+def settings_payload(user):
+    """把一份档案（账号 dict 或 local_profile()）里那套练习默认值摊平成 JSON。
+
+    /api/me 单独暴露这份值是为了「API 报的默认值」和「学生打开练习页看到的默认值」
+    不可能对不上：两边都走 rhythm_defaults() / overlap_default() 同一套边界。
+    """
+    rhythm = rhythm_defaults(user)
+    return {
+        "default_count": user["default_count"],
+        "time_limit": user["time_limit"],
+        "voice": user["voice"],       # 历史列：近似音现在每题随机抽男女声
+        # 看读译 / 听读写那四个走的是渲染练习页同一套函数（并且一样夹回边界）
+        "round1_seconds": float(rhythm["round1"]["value"]),
+        "round2_seconds": float(rhythm["round2"]["value"]),
+        "round_gap_seconds": float(rhythm["gap"]["value"]),
+        "overlap_record": overlap_default(user),
+    }
+
+
 @app.get("/api/me")
 def api_me():
+    # mode 摆在最前面：前端据此决定要不要把数据往服务器写。本地模式下这里永远是
+    # logged_in=False，哪怕浏览器还留着切模式之前的登录 cookie——
+    # 那种 cookie 现在是废的，不该让前端以为自己有个账号。
+    if is_local():
+        return jsonify({"logged_in": False, "mode": "local",
+                        "username": None, "nickname": None,
+                        "settings": settings_payload(local_profile())})
     user = current_user()
     if not user:
-        return jsonify({"logged_in": False})
-    rhythm = rhythm_defaults(user)
+        return jsonify({"logged_in": False, "mode": "server"})
     return jsonify({
         "logged_in": True,
+        "mode": "server",
         "username": user["username"],
         "nickname": user["nickname"],
-        "settings": {
-            "default_count": user["default_count"],
-            "time_limit": user["time_limit"],
-            "voice": user["voice"],       # 历史列：近似音现在每题随机抽男女声
-            # 看读译 / 听读写那四个走的是渲染练习页同一套函数（并且一样夹回边界），
-            # 这样「API 报的默认值」和「学生打开练习页看到的默认值」不可能对不上。
-            "round1_seconds": float(rhythm["round1"]["value"]),
-            "round2_seconds": float(rhythm["round2"]["value"]),
-            "round_gap_seconds": float(rhythm["gap"]["value"]),
-            "overlap_record": overlap_default(user),
-        },
+        "settings": settings_payload(user),
     })
 
 

@@ -19,7 +19,9 @@
    点「开始练习」时读一次并写进会话 params，中途改框不影响正在跑的这轮。
    「边播边录」这个开关也一起进 params，因为它改变了「我的朗读」里听到的内容。
 
-   结束后把所有作答一次性提交 /api/practice/finish，跳转结果页逐题回看。 */
+   结束后把所有作答一次性交给 PracticeStore（服务器模式提交 /api/practice/finish，
+   本地模式写本机 IndexedDB），再跳转结果页逐题回看。录音同理走 saveRecording：
+   脚本里没有任何一处判断运行模式。 */
 (() => {
   const body = document.body;
   const practiceType = body.dataset.practiceType;
@@ -69,6 +71,7 @@
   let stats = { right: 0, wrong: 0 };
   let recorder = null;
   let micBroken = false;
+  let recordingWarned = false;   // 本地模式保存失败只提醒一次，别逐题弹
   let currentWord = null;
 
   /** 读一个秒数输入框：清空或写非数字都用默认值兜底，出格的值夹到 min/max。 */
@@ -117,11 +120,8 @@
         // 边播边录会把标准音一起录进「我的朗读」，结果页得说清这一轮是怎么录的
         params.overlap_record = overlap;
       }
-      const sess = await Common.api("/api/practice/session", {
-        practice_type: practiceType,
-        params
-      });
-      sessionId = sess.session_id;
+      const sess = await PracticeStore.createSession(practiceType, params);
+      sessionId = sess.sessionId;
 
       const data = await Common.api("/api/words", { count });
       words = data.words;
@@ -189,12 +189,22 @@
       }
       if (blobInfo) {
         try {
-          const saved = await uploadRecording(blobInfo.blob, blobInfo.ext, {
+          const saved = await PracticeStore.saveRecording(blobInfo.blob, blobInfo.ext, {
             session_id: sessionId, seq
           });
           recordings[seq] = { path: saved.path, url: saved.url };
         } catch (err) {
-          /* 录音上传失败不影响判分，结果页会显示「没有录到音」 */
+          /* 保存录音失败不影响判分，结果页会显示「没有录到音」。
+             但两种模式的后果不一样：服务器模式只是这一题没传上去，
+             本地模式是这台设备上真的没有了，没有第二份备份。
+             所以本地模式第一次失败就当场说清楚，并把后面题目的录音停掉 ——
+             存储出问题（多半是配额满）通常是连续的，逐题再录 20 次只是白等。 */
+          if (PracticeStore.local && !recordingWarned) {
+            recordingWarned = true;
+            micBroken = true;
+            Common.toast(`本地保存录音失败（${err.message}）：本次练习后续不再录音，` +
+              "已有的作答照常判分。请到「我的数据」看存储空间，必要时先导出备份。", "warning", 8000);
+          }
         }
       }
       await Common.wait(gapMs);
@@ -496,8 +506,8 @@
     $("finishing").classList.remove("d-none");
     releaseMic();          // 跳转结果页之前先把录音灯关掉
     try {
-      const res = await Common.api("/api/practice/finish", { session_id: sessionId, records });
-      location.href = res.result_url;
+      const res = await PracticeStore.finish(sessionId, records);
+      location.href = res.resultUrl;
     } catch (err) {
       Common.toast(`保存失败：${err.message}`, "danger");
       $("finishing").classList.add("d-none");

@@ -62,11 +62,25 @@
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="stat-box"><div class="value">{{ '已登录' if current_user else '未登录' }}</div><div class="label">当前状态</div></div>
+    <div class="stat-box">
+      {% if local_mode %}
+      <div class="value">本地模式</div><div class="label">不用登录 · 数据只在这台设备</div>
+      {% else %}
+      <div class="value">{{ '已登录' if current_user else '未登录' }}</div><div class="label">当前状态</div>
+      {% endif %}
+    </div>
   </div>
 </div>
 
-{% if not current_user %}
+{% if local_mode %}
+<div class="alert alert-info">
+  <i class="bi bi-hdd me-2"></i><strong>不用登录就能练。</strong>
+  点上面任意一张卡片直接开始；练习记录和你的朗读录音都存在
+  <strong>这台设备的浏览器里</strong>，服务器上不保存任何关于你的内容，
+  想留档或换设备请用<a href="{{ url_for('account') }}" class="alert-link">我的数据</a>导出备份。
+  练习会用到麦克风和语音合成，首次使用时浏览器会请求权限，请选择「允许」。
+</div>
+{% elif not current_user %}
 <div class="alert alert-info">
   <i class="bi bi-info-circle-fill me-2"></i><strong>使用提示：</strong>三个练习模块都需要
   <a href="{{ url_for('register') }}" class="alert-link">注册</a> 并

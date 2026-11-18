@@ -5,7 +5,11 @@
 <div style="max-width:640px;margin:0 auto;">
   <div class="hero">
     <h1>练习设置</h1>
+    {% if local_mode %}
+    <p class="mb-0 opacity-75">这些值存在这台设备的浏览器里，只影响本机；开始时仍可临时改</p>
+    {% else %}
     <p class="mb-0 opacity-75">这些值是三个练习页的默认参数，开始时仍可临时改</p>
+    {% endif %}
   </div>
 
   {% if message %}
@@ -13,7 +17,10 @@
   {% endif %}
 
   <div class="card shadow-sm">
-    <form method="post" action="{{ url_for('settings') }}" class="card-body">
+    {# id 是给 scripts/practice-store.js 的：本地模式下它拦住这张表单的提交，
+       把值写进本机 localStorage，一个字都不发回服务器。表单的 action 保持不变，
+       这样即使 JS 没跑起来，按提交也只会重新拿回同一张表单（后端本地分支不写库）。 #}
+    <form method="post" action="{{ url_for('settings') }}" class="card-body" id="settings-form">
       <div class="mb-4">
         <label class="form-label" for="default_count">默认题量（1-100）</label>
         <input type="number" class="form-control" id="default_count" name="default_count"
@@ -71,6 +78,12 @@
         <i class="bi bi-info-circle me-1"></i>
         上面这几项只是<strong>默认值</strong>：进练习页时会自动填好，开练之前仍然可以临时改，
         临时改的那次不会被存回来。
+        {% if local_mode %}
+        <div class="mt-1">
+          <i class="bi bi-hdd me-1"></i>本地模式下这些值存在<strong>这台设备</strong>的浏览器里，
+          换设备就得重新设；练习记录本身在<a href="{{ url_for('account') }}">我的数据</a>里可以导出备份。
+        </div>
+        {% endif %}
       </div>
 
       <div class="mb-4">
@@ -85,7 +98,7 @@
       </div>
 
       <button type="submit" class="btn btn-primary w-100 py-2">
-        <i class="bi bi-save me-2"></i>保存设置
+        <i class="bi bi-save me-2"></i>{% if local_mode %}保存到这台设备{% else %}保存设置{% endif %}
       </button>
     </form>
   </div>

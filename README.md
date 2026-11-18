@@ -36,6 +36,32 @@ python scripts/manage_invite.py add            # 造一个码，注册页照着�
 set REGISTER_MODE=open && python app.py        # Windows；本地开发直接敞开
 ```
 
+## 两种运行模式
+
+一个环境变量切换，`APP_MODE=server`（默认）或 `APP_MODE=local`，改完要重启进程：
+
+| | `server` | `local` |
+|---|---|---|
+| 要不要登录 | 要，注册还要邀请码 | 不要，也没有注册口 |
+| 成绩与朗读录音存哪儿 | 服务器的 `data/app.db` 与 `data/recordings/` | **这台设备浏览器**的 IndexedDB，服务器一个字节都不写 |
+| 默认题量、限时等设置 | 存在账号里（`users` 表） | 存在本机 localStorage（`ep_settings`） |
+| 换设备 / 换浏览器 | 登录后记录照样在 | 记录不会跟过去，得自己导出备份再导入 |
+| 老师看全班进度 | 能 | 看不到 |
+| 导航右上角 | 用户名 / 账号 | 「本地模式 · 只存这台设备」徽标 + 我的数据 |
+
+两种模式**都仍然需要数据库**：词库和近似音题库（`words` / `vowel_items` / `sentence_items`）
+是出题的数据源，`local` 只是不往里写，所以 `scripts/init_db.py` 这一步在哪种模式下都不能省。
+
+`local` 模式是给这两种场景准备的：机房里公用一台机器、不想给每个人建账号；
+或者服务器入站还没放行（见「移动端」与 `docs/deployment.md`），先用一台能跑的机器把课开了。
+
+值写错不会悄悄变成 `local`：`LOCAL`、`LocalMode` 这类拼写会退回 `server`（要登录）并往 stderr
+打一行中文警告 —— 宁可让老师发现「怎么还要登录」，也不要班级账号体系被一个拼写错误关掉。
+
+数据落到哪儿由 `scripts/practice-store.js` 这一个门面决定，三个练习脚本里没有任何一处判断模式；
+`local` 模式的全部本地存储逻辑在 `scripts/local-store.js`。细节与备份责任见
+[`docs/deployment.md`](docs/deployment.md) 第 8 节。
+
 ## 生产部署
 
 要把这个平台部署到服务器供一个班（约 240 人）同时使用，请看 [`docs/deployment.md`](docs/deployment.md)。
@@ -68,10 +94,27 @@ scripts/import_quiz3000.py
 scripts/sentence_texts.json
                       4A 整句文本（由语音转写脚本生成后人工校验，进版本库）
 scripts/*.js          前端脚本（由 /js/<name> 路由提供，只放行 .js）
+scripts/common.js     两种模式共用的基础件：请求、播放、倒计时、Recorder 录音
+scripts/practice-store.js
+                      运行模式的唯一分叉点：成绩/录音交给服务器还是本机，练习脚本不判断模式；
+                      本地模式的设置读写（localStorage）也在这里
+scripts/local-store.js
+                      本地模式的 IndexedDB 存储层（仅 local 模式加载）：会话、逐题、录音、
+                      配额、导出导入
+scripts/local-result.js
+                      本地模式的结果页：从 IndexedDB 取这一场逐题画出来
+scripts/local-data.js
+                      「我的数据」页：本机统计、申请持久化存储、导出 / 导入 / 删除
 scripts/serve_https.py
                       生成带本机 IP SAN 的自签证书，并用 HTTPS 起 Flask——
                       手机要用浏览器录音就得走 https 或 localhost，见「移动端」一节
 templates/            Jinja2 模板
+templates/result_local.html
+                      本地模式的结果页空壳：内容由 local-result.js 现取现画，后端不查库
+templates/local_data.html
+                      本地模式的「我的数据」页，同样只是个壳
+templates/mode_notice.html
+                      本地模式下有人访问 /login /register 时给的解释页
 static/css/style.css  自定义样式
 static/audio/vowel/   近似音单词音频，命名 n.m-word.f.wav / n.m-word.m.wav
 static/audio/sentence/

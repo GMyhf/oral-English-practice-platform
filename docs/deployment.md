@@ -454,10 +454,113 @@ echo "0 3 * * * root /opt/english-practice/app/scripts/backup.sh" | sudo tee /et
 
 ---
 
-## 8. 参考
+## 8. 两种运行模式（`APP_MODE`）
+
+同一个代码库支持两种跑法，由 `/etc/english-practice/env` 里的 `APP_MODE` 决定，
+改完必须 `sudo systemctl restart english-practice` 才生效（这个值在进程启动时读一次，
+和 `REGISTER_MODE` 一样）。
+
+| | `server`（默认） | `local` |
+|---|---|---|
+| 登录 | 要，注册还要邀请码 | 不要，`/login` `/register` 只会给一张说明页 |
+| 成绩（会话 + 逐题） | `data/app.db` | 这台设备浏览器的 IndexedDB（库名 `ep_local_db`） |
+| 朗读录音 | `data/recordings/` | 同一个 IndexedDB 里的 Blob |
+| 设置（题量、三段时长） | `users` 表 | 这台设备的 localStorage（键 `ep_settings`） |
+| 出题数据（词库、近似音题库） | 从库里读 | **同样从库里读**，只是不写 |
+| 老师的可见范围 | 全班进度 | 什么都看不到 |
+
+### 8.1 切换
+
+```bash
+sudo vi /etc/english-practice/env          # APP_MODE=local
+sudo systemctl restart english-practice
+```
+
+两种模式下 `scripts/init_db.py` 都不能省：`local` 不写库，但词库和近似音题库是出题的数据源，
+库里没有词就直接抽不到题。数据库、`data/recordings/`、nginx 的静态直出配置都不用动 ——
+`local` 模式只是不再往它们里写。
+
+值写错（`LOCAL`、`LocalMode`、多一个空格）不会把登录体系悄悄关掉：
+会退回 `server` 并往 journald 里打一行中文警告。
+
+```bash
+sudo journalctl -u english-practice -b --no-pager | grep APP_MODE
+```
+
+### 8.2 切完怎么确认（在服务器本机上也验得出）
+
+```bash
+# 页面外壳里带着模式标记（base.html 的 <body data-mode="...">）；local 下不该出现 /login /register 的链接
+curl -s http://127.0.0.1:8000/ | grep -o 'data-mode="[a-z]*"'
+# /api/me 会如实报告模式
+curl -s http://127.0.0.1:8000/api/me
+# local 模式下三个写接口一律 409，而且不会落库
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/api/practice/session \
+     -H 'Content-Type: application/json' -d '{"practice_type":"vowel","params":{}}'
+```
+
+看到 `409` 才算切到位。这两个性质有回归测试兜着：`tests/test_app_modes.py`
+（含「用别人的服务器会话号在本地模式机器上读不出任何内容」这条 —— 本地模式的结果页
+是个空壳，后端一行库都不查）。
+
+浏览器那一半（IndexedDB 真的存下了、录音真的能回放）只能在设备上验，最短路径走一遍：
+
+1. 打开首页，右上角是「本地模式 · 只存这台设备」，点任意练习不需要登录。
+2. **看读译**做 2 题、每题都录音 → 结束后的结果页能逐题听到自己的朗读。
+   （近似音只练听辨、不录音，要验录音得选看读译或听读写。）
+   这一条同时盯住一个很容易复发的坑：录音明明存进了 IndexedDB，结果页却说「没有录到音」——
+   那是 `records.recording_path` 少了 `local:` 前缀，读的一侧（`scripts/local-result.js`）
+   全靠这个前缀认路，见 `scripts/local-store.js` 的 `saveRecords`。
+3. 「我的数据」显示 1 场 / 2 条作答、录音 2 条；点「导出（含录音）」拿到的文件不该只有几百字节，
+   页面上那句「N 条录音已含在文件里」得真的对得上（这一场没录音时不该冒出「0 条录音」）。
+4. 回到服务器上复查「真的一个字都没写」（在 `/opt/english-practice/app` 下，用服务账号）：
+
+```bash
+sudo -u englishapp /opt/english-practice/venv/bin/python -c "
+import sqlite3
+conn = sqlite3.connect('data/app.db')
+print('sessions', conn.execute('SELECT count(*) FROM practice_sessions').fetchone()[0],
+      'records',   conn.execute('SELECT count(*) FROM practice_records').fetchone()[0])
+"
+ls data/recordings/ | wc -l
+```
+
+练完一轮前后这两个数都不该变。变了就说明这台机器其实还在 `server` 模式（检查 `APP_MODE` 有没有拼对、
+服务有没有重启）。
+
+### 8.3 备份责任从服务器转到设备
+
+`local` 模式把「数据只在服务器上」这个前提换掉了，备份这件事随之变成设备使用者的责任：
+
+- **浏览器随时可能清掉这些记录**：用户清除浏览数据、换浏览器、换电脑、用无痕窗口，
+  记录就没了，服务器上没有第二份可以找回。
+- 「我的数据」页（`/account`）上有三件事可以做：
+  1. **申请持久化存储** —— 调 `navigator.storage.persist()`，让浏览器在磁盘紧张时不自动驱逐。
+     多数桌面浏览器有交互就批，手机 Chrome 会弹权限，**被拒不算故障**，页面会转而提醒导出。
+  2. **导出（含录音）/ 只导出记录** —— 单个 JSON 文件，录音以 base64 内嵌。
+     录音合计超过 40MB 时自动降级为「只导记录」，并在页面上说明为什么。
+  3. **导入备份文件** —— 是**追加**不是覆盖：每一场都拿本机新的自增编号落库，
+     原有的记录一律不动，导入后能在列表里看到来源痕迹（`imported_from`）。
+- 机房公用机的常规做法：一学期开学导一次，换机时在新机器上导入。
+
+### 8.4 从 `local` 切回 `server` 时
+
+设备上 IndexedDB 里的记录**不会自动上传**，也不会被删。切回之后「我的数据」页不再出现，
+那些记录在这个模式下看不见也导不出来。所以：
+
+1. 想让这些成绩进服务器，就在还是 `local` 的时候导出文件，再在 `server` 模式下
+   由老师决定是否人工登记 —— 目前没有「把备份灌进 `practice_sessions`」的工具，
+   因为备份里没有用户身份，硬塞只会污染班级数据。
+2. 还想让使用者自己看到它们，就别切回去：`local` 模式下随时可以再导出。
+
+---
+
+## 9. 参考
 
 - 本地开发：`README.md`
 - 设计文档：`docs/design.md`
+- 运行模式的实现：`config.py` 的 `APP_MODE`、`app.py` 的 `is_local()`、
+  `scripts/practice-store.js`（分叉点）、`scripts/local-store.js`（IndexedDB）
 - 生产配置实例：`/etc/english-practice/`（主机上）
 - nginx 配置实例：`/etc/nginx/conf.d/english-practice.conf`（主机上）
 - systemd 单元实例：`/etc/systemd/system/english-practice.service`（主机上）

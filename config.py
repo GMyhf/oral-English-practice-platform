@@ -69,6 +69,36 @@ HASH_QUEUE_TIMEOUT = float(os.environ.get("HASH_QUEUE_TIMEOUT", "20"))
 # 应用自己不限 —— 换台前面没有 nginx 的机器就是裸奔。
 MAX_UPLOAD_MB = float(os.environ.get("MAX_UPLOAD_MB", "20"))
 
+# ------------------------------------------------------------------ 运行模式
+# 这台机是校内云主机，两种用法差别很大，用一个开关切：
+#
+#   server（默认）—— 要登录，练习记录和录音都进服务器的 data/app.db 与 data/recordings/。
+#                    老师能看到全班的进度，换台设备接着练也在。这是现在线上跑的那套。
+#   local         —— 不登录（也没有注册口），练习记录和录音全部留在**这台设备浏览器**的
+#                    IndexedDB 里，服务器一个字都不写。
+#
+# local 模式不是为了省流量，是为了这两种场景：
+#   1) 机房/教室共用一台机器，不想给每个人建账号；
+#   2) 服务器还没部署好、或者入站没放行（见 docs/deployment.md），先用一台能跑的机器把课开了。
+#
+# 切到 local 时服务器侧仍然要数据库 —— 词库和近似音题库（words / vowel_items / sentence_items）
+# 是出题的数据源，只读不写。所以 scripts/init_db.py 这一步在两种模式下都不能省。
+#
+# 默认取 server 是有意的：写错值（LOCAL / LocalMode / 多打个空格）就退回「要登录」那一档，
+# 宁可让老师发现「怎么还要登录」，也不要本来的班级账号体系被一个拼写错误悄悄关掉。
+# 这个值和 REGISTER_MODE 一样是 import 时读一次，改完要重启服务才生效。
+_APP_MODE_RAW = os.environ.get("APP_MODE", "server").strip().lower()
+APP_MODE = _APP_MODE_RAW if _APP_MODE_RAW in ("server", "local") else "server"
+if _APP_MODE_RAW != APP_MODE:
+    # 走 stderr 而不是 logger：config 被 import 的时候 Flask 的 logger 还没配好，
+    # 而这条偏偏是「你以为是本地模式其实不是」这种一定要看见的信息。
+    import sys
+    print(
+        f"[config] APP_MODE={_APP_MODE_RAW!r} 不是 server/local 之一，已退回 server（要登录）。",
+        file=sys.stderr,
+    )
+
+
 # ------------------------------------------------------------------ 注册闸门
 #
 # 这门课的站只要挂在能被扫到的地址上，开放注册就等于请扫描器进来：机器人在几天内

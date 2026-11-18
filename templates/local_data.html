@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}我的数据 · 英语词汇发音练习平台{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1><i class="bi bi-hdd me-2"></i>我的数据</h1>
+  <p class="mb-0 opacity-75">本地模式：练习记录和朗读录音都只存在这台设备的浏览器里，服务器上没有副本</p>
+</div>
+
+<div class="alert alert-warning py-2">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+  <strong>这个差别一定要知道：</strong>浏览器存的数据不是永久保险。
+  清除浏览数据、换浏览器、换电脑、用无痕窗口，都会让记录消失，而服务器那边<strong>没有任何备份可以找回</strong>。
+  要长期留档或换设备继续用，请定期用下面的「导出备份」存一个文件，需要时再「导入」。
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-bar-chart me-2"></i>本机存了多少</h6>
+    <div class="row g-3" id="summary">
+      <div class="col-6 col-md-3"><div class="stat-box"><div class="value" id="sum-sessions">-</div><div class="label">练习场次</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-box"><div class="value" id="sum-records">-</div><div class="label">作答记录</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-box"><div class="value" id="sum-clips">-</div><div class="label">录音条数</div></div></div>
+      <div class="col-6 col-md-3"><div class="stat-box"><div class="value" id="sum-bytes">-</div><div class="label">录音占用</div></div></div>
+    </div>
+    <div class="text-muted small mt-3" id="quota-line">正在查询浏览器配额…</div>
+    <div class="mt-2" id="persist-line"></div>
+    <div class="text-muted small mt-2" id="backup-line"></div>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-download me-2"></i>备份与迁移</h6>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button class="btn btn-primary" id="btn-export-audio">
+        <i class="bi bi-music-note-beamed me-1"></i>导出（含录音）
+      </button>
+      <button class="btn btn-outline-primary" id="btn-export-lite">
+        <i class="bi bi-file-earmark-text me-1"></i>只导出记录（文件小）
+      </button>
+      <label class="btn btn-outline-secondary mb-0">
+        <i class="bi bi-upload me-1"></i>导入备份文件
+        <input type="file" id="import-file" accept=".json,application/json" class="d-none">
+      </label>
+      <button class="btn btn-outline-danger" id="btn-clear">
+        <i class="bi bi-trash me-1"></i>清空本机全部记录
+      </button>
+    </div>
+    <div class="form-text mt-2">
+      「含录音」把音频一起写成文件里的 base64，所以文件会大不少；录音总量超过上限时会自动只导出记录并说明原因。
+      导入是<strong>追加</strong>：备份里的每一场都会拿一个新的本机编号存进来，不会覆盖你现在已有的记录。
+    </div>
+    <div class="alert py-2 mt-3 d-none" id="io-message"></div>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-clock-history me-2"></i>本机练习记录</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr><th>时间</th><th>类型</th><th class="text-end">题数</th><th class="text-end">正确</th>
+              <th class="text-end">错误</th><th class="text-end">录音</th><th></th></tr>
+        </thead>
+        <tbody id="session-rows"></tbody>
+      </table>
+    </div>
+    <p class="text-muted mb-0 d-none" id="no-sessions">
+      这台设备上还没有练习记录。从 <a href="{{ url_for('practice') }}">练习选择</a> 开始第一轮吧。
+    </p>
+  </div>
+</div>
+
+<a href="{{ url_for('practice') }}" class="btn btn-primary">去练习</a>
+<a href="{{ url_for('settings') }}" class="btn btn-outline-secondary">练习设置</a>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('scripts_js', filename='local-data.js') }}"></script>
+{% endblock %}

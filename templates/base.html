@@ -8,7 +8,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body {% block body_attrs %}{% endblock %}>
+<body data-mode="{{ data_mode }}" {% block body_attrs %}{% endblock %}>
 
 <nav class="navbar navbar-expand-lg shadow-sm" style="background:linear-gradient(135deg,#4f6df5,#7a8cff);">
   <div class="container">
@@ -21,7 +21,13 @@
     <div class="collapse navbar-collapse" id="nav">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('index') }}">首页</a></li>
-        {% if current_user %}
+        {% if local_mode %}
+        {# 本地模式：不用登录就有练习/设置/我的数据，导航里绝不出现「账号」这种
+           会让人以为数据存在服务器上的词。#}
+        <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('practice') }}">练习</a></li>
+        <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('settings') }}">设置</a></li>
+        <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('account') }}">我的数据</a></li>
+        {% elif current_user %}
         <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('practice') }}">练习</a></li>
         <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('settings') }}">设置</a></li>
         <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('account') }}">账号</a></li>
@@ -29,7 +35,12 @@
         <li class="nav-item"><a class="nav-link text-white-50" href="{{ url_for('help_page') }}">帮助</a></li>
       </ul>
       <div class="d-flex align-items-center gap-2">
-        {% if current_user %}
+        {% if local_mode %}
+        <span class="badge rounded-pill text-bg-light text-dark border"
+              title="练习记录和录音都存在这台设备的浏览器里，服务器不保存任何内容">
+          <i class="bi bi-hdd me-1"></i>本地模式 · 只存这台设备
+        </span>
+        {% elif current_user %}
         <span class="text-white-50">你好, {{ current_user.nickname or current_user.username }}</span>
         <form action="{{ url_for('logout') }}" method="post" class="d-inline">
           <button class="btn btn-outline-light btn-sm">退出登录</button>
@@ -51,6 +62,15 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('scripts_js', filename='common.js') }}"></script>
+{# 模式门面在两种模式下都要加载：三个练习脚本一律通过 PracticeStore 交数据，
+   少这个文件练习页就开始报错。本地存储层（IndexedDB）只在本地模式引，
+   服务器模式的页面除了这一行以外和改动前完全一致。
+   顺序有讲究：local-store.js 必须在 practice-store.js 之前，
+   后者加载时会立刻用 LocalStore 回填设置。 #}
+{% if local_mode %}
+<script src="{{ url_for('scripts_js', filename='local-store.js') }}"></script>
+{% endif %}
+<script src="{{ url_for('scripts_js', filename='practice-store.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
