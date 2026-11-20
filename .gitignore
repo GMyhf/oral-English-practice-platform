@@ -18,6 +18,8 @@ __pycache__/
 
 # 用户朗读录音属于个人数据，不进版本库（目录由 /api/recording 自动创建）
 data/recordings/
+# init_db.py --reset 把旧录音整体改名留底，同样是个人数据
+data/recordings.bak-*/
 
 # SQLite 库由 scripts/init_db.py 生成，里面是账号哈希与成绩，同样不进版本库
 data/*.db

@@ -26,7 +26,9 @@ python app.py                     # 打开 http://127.0.0.1:5000
 ```
 
 `init_db.py` 会重复执行（`CREATE TABLE IF NOT EXISTS`）。想清空重来用
-`python scripts/init_db.py --reset`，这会删除所有账号和练习记录。
+`python scripts/init_db.py --reset`，这会删除所有账号、练习记录和邀请码：
+要输入 `RESET` 确认（非交互环境加 `--yes`），删之前会把库备份成 `data/app.db.bak-<时间>`，
+录音目录整体改名为 `data/recordings.bak-<时间>`。
 
 **本地第一次注册会被邀请码挡住**（`REGISTER_MODE` 默认 `invite`，见「注册保护」一节）。
 开发机上要么先发个码，要么显式关掉闸门：

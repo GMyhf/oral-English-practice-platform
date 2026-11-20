@@ -5,7 +5,7 @@ import uuid
 from functools import wraps
 
 import config
-from db import get_db, close_db
+from db import get_db, close_db, resolve_recording_dir
 from flask import (
     Flask,
     abort,
@@ -53,10 +53,7 @@ RECORDING_NAME_RE = re.compile(r"^u(\d+)_[0-9a-f]{12}\.[A-Za-z0-9]{1,8}$")
 
 def recording_dir():
     """录音目录在文件系统上的绝对路径（RECORDING_DIR 相对/绝对都接受）。"""
-    raw = (config.RECORDING_DIR or "data/recordings").replace("\\", "/")
-    if os.path.isabs(raw):
-        return os.path.normpath(raw)
-    return os.path.normpath(os.path.join(BASE_DIR, raw))
+    return resolve_recording_dir()
 
 
 def recording_prefix():

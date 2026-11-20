@@ -3,6 +3,17 @@ import os
 # 写死的默认密钥等于公开密钥（任何人都能伪造登录 cookie），所以未配置时随机生成。
 SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(24).hex()
 
+# deploy/env.example 里那行是 SECRET_KEY={{GENERATE_A_RANDOM_64_CHAR_HEX_STRING}}。
+# 复制模板忘了替换时，它是个非空字符串，上面那行会照单全收 —— 而这串字符就写在
+# 公开仓库里，等于把签名密钥公布了：知道它就能给任意 user_id 签出登录 cookie。
+# 宁可起不来（systemd 日志里一眼能看到原因），也不要带着公开密钥上线。
+if "{{" in SECRET_KEY or "}}" in SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY 还是部署模板里的占位符，没有替换成真随机值。"
+        "用 python -c \"import os; print(os.urandom(32).hex())\" 生成一个，"
+        "写进 /etc/english-practice/env 后再启动。"
+    )
+
 # 路径类配置一律「相对项目根」或「绝对路径」都接受，解析在 db.resolve_db_path()
 # 和 app.recording_dir() 里。
 #
