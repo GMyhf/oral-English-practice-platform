@@ -2,6 +2,7 @@ import os
 import json
 import re
 import uuid
+from urllib.parse import urlsplit
 from functools import wraps
 
 import config
@@ -36,6 +37,15 @@ if not os.environ.get("SECRET_KEY"):
 # 而一个 20MB 的录音包在 1 核机上足以把内存和磁盘一起顶穿。
 # 超限后 Werkzeug 在读取请求体时就抛 413，body 根本不会落地，见下面的 errorhandler。
 app.config["MAX_CONTENT_LENGTH"] = int(config.MAX_UPLOAD_MB * 1024 * 1024)
+
+# 登录 cookie 的属性。Flask 默认只有 HttpOnly：
+# - SameSite=Lax：别的网站发来的跨站 POST 不带这枚 cookie，挡掉「外站一个表单
+#   就替学生改设置、改用户名」这类 CSRF。站内表单、从外链点进来的 GET 都不受影响。
+#   各浏览器对「没写 SameSite」的默认处理不一致（Chrome 当 Lax，且签发后 2 分钟内放行 POST），
+#   所以要显式写出来，不依赖默认。
+# - Secure：见 config.SESSION_COOKIE_SECURE 的说明，生产开、开发关。
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
 
 RECORDING_EXTENSIONS = {"webm", "ogg", "wav", "mp4", "m4a", "mp3", "mpeg"}
 
@@ -190,10 +200,21 @@ def inject_user():
 
 
 def safe_next(target):
-    """只允许跳回本站相对路径，避免开放重定向。"""
-    if target and target.startswith("/") and not target.startswith("//"):
-        return target
-    return None
+    """只允许跳回本站相对路径，避免开放重定向。
+
+    只看「以 / 开头、不以 // 开头」不够：/<tab>/evil.example.com 两条都满足，
+    但浏览器解析 URL 时会先删掉 tab、换行，剩下 //evil.example.com 就跳出站了。
+    反斜杠同理（部分浏览器把 “/ 反斜杠 evil”当成 //evil）。所以控制字符和反斜杠一律拒绝，
+    再用 urlsplit 确认既没有协议也没有主机。
+    """
+    if not target or not target.startswith("/") or target.startswith("//"):
+        return None
+    if "\\" in target or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
+        return None
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return None
+    return target
 
 
 def login_required(view):
@@ -395,6 +416,11 @@ def logout():
         # 本地模式没有会话可退出。这里也不能调 session.pop 之后 redirect 到首页——
         # 首页在本地模式下照样能练，来回跳只会让人以为「退出去又自动登进来了」。
         return mode_notice()
+    # 只收 POST：GET 能退出的话，外站放一张 <img src=".../logout"> 就能把人踢下线，
+    # SameSite=Lax 对顶层 GET 不设防。导航栏里的退出按钮本来就是 POST 表单。
+    # GET 仍留在 methods 里，是为了本地模式那条说明页（上面）照旧能打开。
+    if request.method != "POST":
+        abort(405)
     session.pop("user_id", None)
     return redirect(url_for("index"))
 

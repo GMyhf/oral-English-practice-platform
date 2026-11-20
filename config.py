@@ -69,6 +69,12 @@ HASH_QUEUE_TIMEOUT = float(os.environ.get("HASH_QUEUE_TIMEOUT", "20"))
 # 应用自己不限 —— 换台前面没有 nginx 的机器就是裸奔。
 MAX_UPLOAD_MB = float(os.environ.get("MAX_UPLOAD_MB", "20"))
 
+# 登录 cookie 是否只走 https。生产在 nginx 后面全站 https（80 端口只做 301），必须开：
+# 不开的话学生第一次手敲 http:// 时，浏览器会先把 cookie 明文发出去再被跳转。
+# 默认关是为了开发：用 http://192.168.x.x:5000 调试时，带 Secure 的 cookie
+# 浏览器根本不存，表现为「登录成功又回到登录页」。只认 true，其余一律当关。
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").strip().lower() == "true"
+
 # ------------------------------------------------------------------ 运行模式
 # 这台机是校内云主机，两种用法差别很大，用一个开关切：
 #
