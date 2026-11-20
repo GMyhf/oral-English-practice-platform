@@ -260,15 +260,7 @@
     running = false;
     document.removeEventListener("keydown", onKey);
     $("stage").classList.add("d-none");
-    $("finishing").classList.remove("d-none");
-    try {
-      const res = await PracticeStore.finish(sessionId, records);
-      location.href = res.resultUrl;
-    } catch (err) {
-      Common.toast(`保存失败：${err.message}`, "danger");
-      $("finishing").classList.add("d-none");
-      $("setup").classList.remove("d-none");
-      $("btn-start").disabled = false;
-    }
+    // 失败时不退回设置面板（旧记录会和下一场混在一起），见 Common.submitResults
+    await Common.submitResults(() => PracticeStore.finish(sessionId, records));
   }
 })();

@@ -39,30 +39,69 @@ const Common = (() => {
     return json;
   }
 
+  // 播放看门狗：只听 ended / error 不够。iOS 切到后台会把媒体暂停、回来后不自动续播，
+  // 弱网下也可能一直 stalled —— 这两种情况既不 ended 也不 error，await 它的练习就永远停在
+  // 「正在播放」。所以元数据到了以后给「时长 + 余量」，元数据一直不来就用上限兜底，
+  // 超时按播放失败处理（调用方都有失败分支：近似音提示猜一个，看读译 / 听读写退回合成发音）。
+  const PLAY_SLACK_MS = 4000;
+  const PLAY_MAX_MS = 30000;
+  let playToken = 0;
+  let settlePrevious = null;
+
   function playUrl(url, onended) {
+    // 上一段还没放完就被新的一段顶掉：把它的 Promise 收尾（当作没放完），
+    // 不然等它的那个调用方会永远挂着。
+    if (settlePrevious) { settlePrevious(); settlePrevious = null; }
     return new Promise((resolve, reject) => {
       if (!url) { resolve(false); return; }
+      const token = ++playToken;
       const audio = ensureAudio();
+      let watchdog = null;
+      let done = false;
+      const finish = (fn, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(watchdog);
+        if (token === playToken) settlePrevious = null;
+        fn(value);
+      };
+      const arm = ms => {
+        clearTimeout(watchdog);
+        watchdog = setTimeout(() => {
+          // 只有这段还是「当前那段」时才去动共用的 <audio>，免得把下一题的音频停掉
+          if (token === playToken) audio.pause();
+          finish(reject, new Error("音频播放超时：" + url));
+        }, ms);
+      };
+      settlePrevious = () => finish(resolve, false);
+
       // 上一题的回调必须先摘掉：换 src 时旧元素的 ended/error 会串到新音频上
       audio.onended = null;
       audio.onerror = null;
+      audio.onloadedmetadata = null;
       audio.pause();
       if ("speechSynthesis" in window) speechSynthesis.cancel();   // 别和合成音叠在一起
       audio.muted = false;
       audio.src = url;
       audio.onended = () => {
         if (onended) onended();
-        resolve(true);
+        finish(resolve, true);
       };
-      audio.onerror = () => reject(new Error("音频播放失败：" + url));
+      audio.onerror = () => finish(reject, new Error("音频播放失败：" + url));
+      audio.onloadedmetadata = () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          arm(audio.duration * 1000 + PLAY_SLACK_MS);
+        }
+      };
+      arm(PLAY_MAX_MS);
       let started;
       try {
         started = audio.play();
       } catch (err) {
-        reject(err);
+        finish(reject, err);
         return;
       }
-      if (started && started.catch) started.catch(err => reject(err));
+      if (started && started.catch) started.catch(err => finish(reject, err));
     });
   }
 
@@ -175,9 +214,53 @@ const Common = (() => {
     return { promise, stop };
   }
 
+  /** 交卷：成功就跳结果页；失败时留在「正在保存」那块，给「重新保存」和「放弃这场」。
+   *
+   *  以前失败后退回设置面板，可内存里这一场的作答记录、题目游标都还在，再点「开始练习」
+   *  会和新一场混在一起：近似音直接拿旧记录交卷或跳题，看读译 / 听读写记录翻倍、题号重复，
+   *  超过 100 题后服务器回 400，永远交不上。现在只留两条路：原样重交，或者整页重来。
+   *  @param {() => Promise<{resultUrl: string}>} save 真正去保存的那一步，重试时再调一次 */
+  async function submitResults(save) {
+    const box = document.getElementById("finishing");
+    const original = box ? box.innerHTML : "";
+    for (;;) {
+      if (box) { box.innerHTML = original; box.classList.remove("d-none"); }
+      try {
+        const res = await save();
+        location.href = res.resultUrl;
+        return;
+      } catch (err) {
+        if (!box) { toast(`保存失败：${err.message}`, "danger"); return; }
+        const retry = await askRetry(box, err.message);
+        if (!retry) { location.reload(); return; }
+      }
+    }
+  }
+
+  function askRetry(box, message) {
+    return new Promise(resolve => {
+      box.innerHTML = "";
+      const text = document.createElement("div");
+      text.className = "alert alert-danger text-start";
+      text.textContent = `保存失败：${message}。作答记录还在这个页面里，网络恢复后点「重新保存」；` +
+        "放弃的话这一场不会留下记录。";
+      const again = document.createElement("button");
+      again.className = "btn btn-primary me-2";
+      again.textContent = "重新保存";
+      again.addEventListener("click", () => resolve(true));
+      const drop = document.createElement("button");
+      drop.className = "btn btn-outline-secondary";
+      drop.textContent = "放弃这场";
+      drop.addEventListener("click", () => {
+        if (confirm("放弃后这一场的作答都不会保存，确定吗？")) resolve(false);
+      });
+      box.append(text, again, drop);
+    });
+  }
+
   return {
     api, getJson, playUrl, stopAudio, unlockAudio, speak, warmUpSpeech, speechReady,
-    toast, wait, fmtTime, startCountdown
+    toast, wait, fmtTime, startCountdown, submitResults
   };
 })();
 
@@ -270,18 +353,26 @@ class Recorder {
   async start(stream) {
     this.ownsStream = !stream;
     this.stream = stream || await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mime = Recorder.pickMime();
-    if (mime) {
-      this.mode = "mediarecorder";
-      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: mime });
-      this.chunks = [];
-      this.mediaRecorder.ondataavailable = e => {
-        if (e.data && e.data.size > 0) this.chunks.push(e.data);
-      };
-      this.mediaRecorder.start();
-    } else {
-      this.mode = "wav";
-      await this._startWavCapture();
+    try {
+      const mime = Recorder.pickMime();
+      if (mime) {
+        this.mode = "mediarecorder";
+        this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: mime });
+        this.chunks = [];
+        this.mediaRecorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) this.chunks.push(e.data);
+        };
+        this.mediaRecorder.start();
+      } else {
+        this.mode = "wav";
+        await this._startWavCapture();
+      }
+    } catch (err) {
+      // 麦克风已经拿到、录音器却没起来：自己申请的那条流要关掉，否则录音红点一直亮到离开页面
+      if (this.ownsStream && this.stream) this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+      this.mode = null;
+      throw err;
     }
     return this.mode;
   }
@@ -308,13 +399,29 @@ class Recorder {
         if (this.wavSource) { this.wavSource.disconnect(); this.wavSource = null; }
       };
       if (this.mode === "mediarecorder") {
-        this.mediaRecorder.onstop = () => {
+        let done = false;
+        let fallback = null;       // 先声明：下面「已经 inactive」那条路会在设定时器之前就 deliver()
+        const deliver = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(fallback);
           const type = this.mediaRecorder.mimeType || "audio/webm";
-          const blob = new Blob(this.chunks, { type });
+          const blob = this.chunks.length ? new Blob(this.chunks, { type }) : null;
           release();
-          resolve({ blob, ext: Recorder.extOf(type) });
+          resolve({ blob, ext: blob ? Recorder.extOf(type) : null });
         };
-        this.mediaRecorder.stop();
+        // 录音器可能已经自己停了：来电、别的 App 抢麦、蓝牙耳机断开、在地址栏收回权限，
+        // 麦克风轨道一结束 MediaRecorder 就转成 inactive 并且已经触发过 stop。
+        // 这时再调 stop() 按规范是静默返回、不会再来一次 onstop，以前的写法就永远等不到。
+        if (this.mediaRecorder.state === "inactive") { deliver(); return; }
+        this.mediaRecorder.onstop = deliver;
+        // 再兜一层：个别浏览器 stop 之后迟迟不派发 onstop，2 秒后用已收到的数据交差
+        fallback = setTimeout(deliver, 2000);
+        try {
+          this.mediaRecorder.stop();
+        } catch (err) {
+          deliver();
+        }
       } else if (this.mode === "wav") {
         this.processor.disconnect();
         const blob = Recorder.encodeWav(this.samples, this.sampleRate);

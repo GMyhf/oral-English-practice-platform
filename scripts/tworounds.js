@@ -531,17 +531,9 @@
 
   async function finish() {
     $("stage").classList.add("d-none");
-    $("finishing").classList.remove("d-none");
     releaseMic();          // 跳转结果页之前先把录音灯关掉
-    try {
-      const res = await PracticeStore.finish(sessionId, records);
-      location.href = res.resultUrl;
-    } catch (err) {
-      Common.toast(`保存失败：${err.message}`, "danger");
-      $("finishing").classList.add("d-none");
-      $("setup").classList.remove("d-none");
-      $("btn-start").disabled = false;
-    }
+    // 失败时不退回设置面板（旧记录会和下一场混在一起），见 Common.submitResults
+    await Common.submitResults(() => PracticeStore.finish(sessionId, records));
   }
 
   // 音频导入面板：词库里的词现在都有服务器上的真人朗读了，按「服务器 → 本地 → 合成」
