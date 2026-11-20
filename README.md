@@ -194,7 +194,7 @@ python scripts/manage_invite.py purge pku2026          # 确认不用追溯了�
   先哈希再拒等于送外面一个「他零成本、我们烧 CPU」的放大口子。
 - **默认是关（fail-closed）**。忘了配码的后果是「没人注册得上」，而不是
   「注册口对公网敞开」；`REGISTER_MODE` 写了非法值同样退回 `invite`。
-- **随机码只用 `abcdefghjkmnpqrstuvwxyz23456789`**，默认 12 位（约 61 bit）。去掉
+- **随机码只用 `abcdefghjkmnpqrstuvwxyz23456789`**，默认 12 位（31 个字符取 12 位，约 59 bit）。去掉
   0/O、1/I/l 是因为手机上手输几乎必错；服务端比较前统一转小写，iOS 的首字母自动大写
   不会把人坑在门外。
 
