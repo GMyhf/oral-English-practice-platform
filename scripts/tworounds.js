@@ -391,11 +391,39 @@
     await finish();
   }
 
+  // 释义有两种写法：教材种子词是「放弃；抛弃」，Quiz3000 那批来自 ECDICT，
+  // 带词性前缀和领域标签，如「n. 扫除, 打扫；vt. 掸去」「[计] 黑客」「给…穿衣」。
+  // 以前只按标点切、不去前缀，又用双向 includes，结果「n.」「.」「的」都能命中
+  // 某个义项（4665 个带前缀的词输一个句点就判对），「我不知道放弃」也因为含「放弃」判对。
+  const POS_PREFIX = /(^|[\s；;，,、])(?:n|vt|vi|v|a|adj|adv|ad|pron|prep|num|conj|interj|int|aux|art|abbr|pl|pref)\.\s*/gi;
+
+  /** 去掉作答和义项里不承载意思的部分：省略号、波浪线、空白、标点。 */
+  function normalizeSense(text) {
+    return text.replace(/…+|\.{2,}|[～~]/g, "")
+      .replace(/[\s\p{P}]/gu, "");
+  }
+
+  function chineseSenses(meaning) {
+    return String(meaning || "")
+      .replace(/\[[^\]]*\]/g, " ")           // [计] [口] 这类领域标签
+      .replace(/（[^）]*）|\([^)]*\)/g, " ")  // 括号里的补充说明
+      .replace(POS_PREFIX, "$1")
+      .split(/[；;／/，,、]/)
+      .map(normalizeSense)
+      .filter(Boolean);
+  }
+
+  /** 中文译文「任写一项即可」：与某个义项相同，或只差一点点（「满意的」对「满意」、
+   *  「放弃了」对「放弃」）。包含关系要求短的一方至少两个字、且不短于长的一方一半，
+   *  这样一个字、一个助词、或者把义项夹在一长句里，都不再算对。 */
   function judgeChinese(word, answer) {
-    const senses = String(word.meaning_cn || "").split(/[；;／/，,、]/).map(s => s.trim()).filter(Boolean);
-    const text = answer.trim();
+    const text = normalizeSense(String(answer || ""));
     if (!text) return false;
-    return senses.some(sense => sense === text || sense.includes(text) || text.includes(sense));
+    return chineseSenses(word.meaning_cn).some(sense => {
+      if (sense === text) return true;
+      const [shorter, longer] = sense.length <= text.length ? [sense, text] : [text, sense];
+      return shorter.length >= 2 && longer.includes(shorter) && shorter.length * 2 >= longer.length;
+    });
   }
 
   // ---------------------------------------------------------------- 辅助
