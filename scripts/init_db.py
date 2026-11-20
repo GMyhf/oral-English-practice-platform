@@ -770,7 +770,8 @@ def scan_quiz3000_audio(conn):
 
 def migrate_words_voice_columns(conn):
     """老库的 words 表没有 audio_f / audio_m，CREATE TABLE IF NOT EXISTS 不会补列，只能 ALTER。"""
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(words)")}
+    # 按列号取，理由同 migrate_users_rhythm_columns：拿裸连接（没设 row_factory）调用也不能崩
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(words)")}
     for name in ("audio_f", "audio_m"):
         if name not in columns:
             conn.execute("ALTER TABLE words ADD COLUMN %s TEXT" % name)
