@@ -12,7 +12,8 @@
 access_log /var/log/nginx/english-practice.access.log;
 error_log  /var/log/nginx/english-practice.error.log warn;
 
-# 学生整场练习的录音要一次性打包上传，nginx 默认的 1m 会把长会话挡成 413。
+# 录音是每题一条、单独 POST 到 /api/recording，这是单条录音的上限，要和 env 里的
+# MAX_UPLOAD_MB 保持一致；nginx 默认的 1m 会把稍长的录音挡成 413。
 # 2026-11-18 那次配置替换就是把它弄丢了 —— 这条不属于「样式问题」，症状要过一阵才出现，
 # 别等学生反馈才发现。
 client_max_body_size 20m;
@@ -45,8 +46,8 @@ location / {
     proxy_set_header Host             $host;
     proxy_set_header X-Real-IP        $remote_addr;
     proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
-    # 这一行决定 Flask 侧看到的 scheme，进而决定 url_for(..., _scheme) 与
-    # 「浏览器是不是安全上下文（麦克风权限）」，别漏。
+    # 应用目前没装 ProxyFix，Flask 还不读这个头；留着是为了以后要用时不必再改 nginx。
+    # 麦克风权限只看浏览器地址栏是不是 https，和这个头无关。
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_connect_timeout 5s;
     proxy_read_timeout    60s;

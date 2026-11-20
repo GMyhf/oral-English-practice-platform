@@ -134,9 +134,9 @@ if _APP_MODE_RAW != APP_MODE:
 REGISTER_MODE = os.environ.get("REGISTER_MODE", "invite").strip().lower()
 
 # 邀请码的尝试结果不在这里限流：挡爆破靠的是码的熵（manage_invite.py 不给参数时
-# 用 secrets 生成 12 位 url-safe，约 71 bit），而不是靠计数器。进程内计数器在多
+# 从 31 个易辨认字符里随机取 12 位，约 59 bit），而不是靠计数器。进程内计数器在多
 # worker 下各记各的，还会被人故意触发把全班锁在门外。真挂公网要在 nginx 那一层
-# 给 /register 加 limit_req，见 /etc/english-practice/HANDOVER.md。
+# 给 /register 加 limit_req，见 docs/deployment.md 7.3。
 REGISTER_CODE_LENGTH = int(os.environ.get("REGISTER_CODE_LENGTH", "12"))
 
 DEFAULT_QUESTION_COUNT = 20

@@ -52,19 +52,11 @@ sudo -u englishapp /opt/english-practice/venv/bin/pip install -r /opt/english-pr
 sudo -u englishapp /opt/english-practice/venv/bin/pip install gunicorn
 ```
 
-### 2.3 初始化数据库
+### 2.3 配置环境变量
 
 ```bash
-# 以 englishapp 身份建库 + 扫描音频（约 11000 个文件，1-2 分钟）
-sudo -u englishapp /opt/english-practice/venv/bin/python /opt/english-practice/app/scripts/init_db.py
-```
-
-`init_db.py` 会创建 `data/app.db`（SQLite）并扫描 `static/audio/` 下的音频文件登记到数据库。重复执行是安全的（`CREATE TABLE IF NOT EXISTS`）。
-
-### 2.4 配置环境变量
-
-```bash
-# 复制模板
+# 复制模板（/etc/english-practice 目录要先建）
+sudo mkdir -p /etc/english-practice
 sudo cp /opt/english-practice/app/deploy/env.example /etc/english-practice/env
 
 # 生成 SECRET_KEY 并编辑
@@ -82,7 +74,37 @@ sudo chmod 640 /etc/english-practice/env
 - `PASSWORD_HASH_METHOD`：`scrypt:16384:8:1`（推荐）或 `scrypt:32768:8:1`（更慢但更安全）
 - `MAX_CONCURRENT_HASHES`：每个 worker 进程同时算密码的上限，默认 2
 
-改完 `REGISTER_MODE` 要重启服务才生效；改其他项不用。
+
+这个文件里的**任何一项**改完都要 `sudo systemctl restart english-practice` 才生效：
+systemd 只在启动服务时读一次 EnvironmentFile，`config.py` 也只在 import 时读一次。
+（发码、换码、吊销邀请码不用重启，那些在数据库里，不在这个文件里。）
+
+#### 以服务账号、带上同一份环境变量跑运维脚本
+
+`sudo -u englishapp python ...` **读不到** systemd 的 EnvironmentFile。只要你在 env 里改过
+`DATABASE_PATH`（比如挪到 /var/lib），这样跑的 `init_db.py`、`manage_invite.py` 就会去操作默认路径上的
+另一个库——而且 `db.connect()` 会静默新建一个空库，码发出去了，线上却注册不了。
+`manage_invite.py` 根据 `REGISTER_MODE` 给的提示也会对不上服务的实际值。
+
+所以下文所有运维命令都用这个辅助函数（放进管理员的 `~/.bashrc`）：
+
+```bash
+# 用法：ep scripts/init_db.py / ep scripts/manage_invite.py list
+ep() {
+    sudo -u englishapp bash -c 'set -a; . /etc/english-practice/env; set +a
+        cd /opt/english-practice/app && exec /opt/english-practice/venv/bin/python "$@"' _ "$@"
+}
+```
+
+### 2.4 初始化数据库
+
+```bash
+# 以 englishapp 身份建库 + 扫描音频（约 11000 个文件，1-2 分钟）
+ep scripts/init_db.py
+```
+
+`init_db.py` 会创建数据库（默认 `data/app.db`，SQLite）并扫描 `static/audio/` 下的音频文件登记到数据库。
+重复执行是安全的：表用 `CREATE TABLE IF NOT EXISTS` 建，老库缺的列会用 `ALTER TABLE` 补上。
 
 ### 2.5 配置 gunicorn
 
@@ -130,17 +152,16 @@ sudo sed -i 's/{{IP_V4}}/10.0.0.1/g' /etc/nginx/conf.d/english-practice.conf
 sudo sed -i 's/{{IP_V6}}/2001:db8::1/g' /etc/nginx/conf.d/english-practice.conf
 sudo sed -i 's/{{DEPLOY_DIR}}/\/opt\/english-practice\/app/g' /etc/nginx/conf.d/english-practice-app.loc
 
-# 测试配置
+# 测试并重载 —— 两个 443 server 块都引用了证书文件，证书没就位时 nginx -t 必然报错。
+# 第一次部署先做完第 3 节（至少放好自签证书），再回来跑这两条。
 sudo nginx -t
-
-# 重载
 sudo systemctl reload nginx
 ```
 
 **关键配置**：
-- `client_max_body_size 20m`：学生整场练习的录音要一次性打包上传，默认 1m 会 413
+- `client_max_body_size 20m`：录音是每题一条、单独 POST 到 `/api/recording` 的，这个值是单条录音的上限，要和 env 里的 `MAX_UPLOAD_MB` 一致；nginx 默认的 1m 会把稍长的录音挡成 413
 - `location /static/` 的 `alias` 必须是 `/opt/english-practice/app/static/`（注意有 `app/` 这一层），少一层就全站 404
-- `proxy_set_header X-Forwarded-Proto $scheme`：决定 Flask 看到的协议，影响麦克风权限（必须 https 或 localhost）
+- `proxy_set_header X-Forwarded-Proto $scheme`：目前应用没装 ProxyFix，Flask 并不读这个头；留着是为了以后要用时不必再改 nginx。麦克风权限只取决于浏览器地址栏是不是 https（或 localhost），和这个头无关
 
 ### 2.8 配置防火墙
 
@@ -174,13 +195,15 @@ sudo restorecon -Rv /opt/english-practice/app/static
 ### 3.1 自签证书（开发 / 内网测试）
 
 ```bash
-# 生成自签证书（SAN 含 IP + 域名，有效期 800 天）
+# 生成自签证书（有效期 800 天）。SAN 里自动写入 localhost、本机主机名和本机所有网卡的 IPv4；
+# 公网 IP 不在本机网卡上（云主机常见）时用 --ip 补上，可以重复。脚本目前不支持写 IPv6 和域名。
 cd /opt/english-practice/app
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/serve_https.py --no-run
+ep scripts/serve_https.py --no-run --ip 10.0.0.1
 
-# 证书会放在 data/https/，把它们复制到 nginx 期望的位置
-sudo cp data/https/cert.pem /etc/pki/tls/certs/english-practice.crt
-sudo cp data/https/key.pem /etc/pki/tls/private/english-practice.key
+# 证书在 data/https/ 下，文件名是 dev-cert.pem / dev-key.pem，复制到 nginx 期望的位置
+sudo cp data/https/dev-cert.pem /etc/pki/tls/certs/english-practice.crt
+sudo cp data/https/dev-key.pem /etc/pki/tls/private/english-practice.key
+sudo chmod 600 /etc/pki/tls/private/english-practice.key
 ```
 
 自签证书第一次访问会弹「不受信任」警告：
@@ -199,22 +222,40 @@ sudo cp data/https/key.pem /etc/pki/tls/private/english-practice.key
 sudo dnf install certbot python3-certbot-nginx   # Rocky / CentOS
 sudo apt install certbot python3-certbot-nginx    # Ubuntu / Debian
 
-# 签发证书（dns-01 验证，不需要公网入站）
-sudo certbot certonly --manual --preferred-challenges dns -d example.com
+签发方式决定了能不能自动续期，二选一：
 
+**方式 A：http-01（80 端口能从公网访问时用，推荐）**。nginx 模板的 80 端口 server 块已经留好了
+`/.well-known/acme-challenge/` → `/var/www/certbot`，排在 301 跳转之前。
+
+```bash
+sudo mkdir -p /var/www/certbot
+sudo restorecon -Rv /var/www/certbot        # 仅 SELinux 系统
+sudo certbot certonly --webroot -w /var/www/certbot -d example.com \
+     --deploy-hook "systemctl reload nginx"
+```
+
+`--deploy-hook` 会被记进 `/etc/letsencrypt/renewal/example.com.conf`，以后每次续期成功都自动 reload nginx。
+然后打开 certbot 自带的续期定时器（名字因发行版而异），并演练一次：
+
+```bash
+sudo systemctl enable --now certbot-renew.timer   # Rocky / CentOS / Fedora
+sudo systemctl enable --now certbot.timer         # Ubuntu / Debian（apt 装的通常已默认开启）
+sudo certbot renew --dry-run
+```
+
+**方式 B：dns-01 手动（服务器没有公网入站时）**
+
+```bash
+sudo certbot certonly --manual --preferred-challenges dns -d example.com
 # 按提示在 DNS 服务商处添加 TXT 记录（_acme-challenge.example.com），等待生效后继续
 ```
 
+⚠️ 这样签出来的证书**不会自动续期**：`certbot renew` 在定时器里是非交互运行的，
+没法替你去 DNS 服务商那里改 TXT 记录，会直接失败。证书 90 天过期，所以要么每次到期前
+（建议第 60 天）手动重跑上面这条命令再 `sudo systemctl reload nginx`，并在日历上设提醒；
+要么换成你的 DNS 服务商对应的 certbot DNS 插件（带 API 凭据，能自动改记录）。
+
 签发完成后，证书在 `/etc/letsencrypt/live/example.com/`，nginx 配置里的 `ssl_certificate` 和 `ssl_certificate_key` 指向这里。
-
-**自动续期**：
-```bash
-# 启用 certbot-renew.timer（每天检查一次，到期前 30 天自动续）
-sudo systemctl enable --now certbot-renew.timer
-
-# 续期后自动 reload nginx（在 /etc/letsencrypt/renewal/example.com.conf 里加）
-# deploy_hook = systemctl reload nginx
-```
 
 ---
 
@@ -233,7 +274,7 @@ sudo systemctl enable --now certbot-renew.timer
 **调优方法**：
 ```bash
 # 在目标机器上跑基准测试（每个方法单开子进程，否则 ru_maxrss 只涨不跌会显示假的 0MB）
-python3 scripts/kdf_bench.py
+ep scripts/kdf_bench.py
 ```
 
 ### 4.2 并发上限
@@ -264,39 +305,36 @@ python3 scripts/kdf_bench.py
 cd /opt/english-practice/app
 sudo -u englishapp git pull origin main
 
-# 如果表结构有变更（看 git log 里的说明），先补列再重启
-sudo -u englishapp /opt/english-practice/venv/bin/python -c "
-from scripts.init_db import migrate_users_rhythm_columns, migrate_words_voice_columns
-import sqlite3
-conn = sqlite3.connect('data/app.db')
-migrate_users_rhythm_columns(conn)
-migrate_words_voice_columns(conn)
-conn.commit()
-"
+# 先备份（见 5.2），再补表结构：不带参数的 init_db.py 是幂等的，
+# 会建出新增的表、给老表补列，并重新登记音频。账号和成绩不动。
+sudo /opt/english-practice/app/scripts/backup.sh
+ep scripts/init_db.py
 
 # 重启服务
 sudo systemctl restart english-practice.service
 ```
 
-**注意**：不要跑 `scripts/init_db.py --reset`，那会删掉所有账号和练习记录。
+以前这里是一段手写的 `python -c` 迁移代码，它没设 `row_factory`，一跑就报
+`TypeError: tuple indices must be integers or slices, not str`，还把库路径写死成 `data/app.db`、
+补不出新加的表。直接跑 `init_db.py` 就够了。
+
+**注意**：不要跑 `scripts/init_db.py --reset`，那会删掉所有账号、练习记录和邀请码。
 
 ### 5.2 备份数据库
 
 ```bash
-# 拍快照（WAL 模式下用 sqlite3.backup()，不要用 cp）
-sudo -u englishapp /opt/english-practice/venv/bin/python -c "
-import sqlite3
-src = sqlite3.connect('data/app.db')
-dst = sqlite3.connect('data/app.db.bak-$(date +%Y%m%d-%H%M%S)')
-with dst:
-    src.backup(dst)
-src.close()
-dst.close()
-"
+# 数据库快照 + 录音打包，存到 /var/backups/english-practice（只有 root 可读），保留 14 天
+sudo /opt/english-practice/app/scripts/backup.sh
 
-# 备份用户录音
-tar -czf /var/backups/english-practice/recordings-$(date +%Y%m%d).tar.gz data/recordings/
+# 存到别处、保留更久
+sudo KEEP_DAYS=30 /opt/english-practice/app/scripts/backup.sh /mnt/nas/english-practice
 ```
+
+`scripts/backup.sh` 做的事：读 `/etc/english-practice/env` 拿到真实的库和录音路径；
+以服务账号身份用 SQLite backup API 拍快照（WAL 模式下不能直接 `cp` 主库），拍完跑一次
+`integrity_check`；把录音目录打成 tar.gz；删掉超过保留天数的旧快照。任何一步失败都非零退出。
+
+录音每天是整份打包，录音多了以后备份目录会按「录音总量 × 保留天数」增长，留意磁盘。
 
 ### 5.3 查看日志
 
@@ -314,35 +352,34 @@ sudo tail -f /var/log/nginx/english-practice.error.log
 ### 5.4 管理邀请码
 
 ```bash
-cd /opt/english-practice/app
+# 发一个不限次数的班用码（随机生成）
+ep scripts/manage_invite.py add
 
-# 发一个不限次数的班用码
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/manage_invite.py add
+# 指定码名，附备注
+ep scripts/manage_invite.py add pku2026 --note "群里发"
 
-# 发一个一码一号的 personalized 码
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/manage_invite.py add pku2026 --note "群里发"
+# 一码一号：只能注册一个账号，发给某一个人
+ep scripts/manage_invite.py add --max-uses 1 --note "张三"
 
 # 查看现有的码、各用掉了几个
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/manage_invite.py list
+ep scripts/manage_invite.py list
 
 # 查某个码注册过谁
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/manage_invite.py users pku2026
+ep scripts/manage_invite.py users pku2026
 
 # 码泄露了：立刻失效，记录留着
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/manage_invite.py revoke pku2026
+ep scripts/manage_invite.py revoke pku2026
 ```
 
 发码 / 换码 / 吊销都不用重启服务；只有改 `REGISTER_MODE` 要重启。
 
 ### 5.5 清理测试数据
 
-```bash
-# 按命名规则批量清探测号（probe_* / ld* / dbg*）
-sudo -u englishapp /opt/english-practice/venv/bin/python scripts/cleanup_testdata.py
-
-# 删单个账号（会先列出名下的会话/作答/录音，再拍库，再停服务删除）
-sudo /opt/english-practice/app/scripts/del_user.sh username
-```
+仓库里**暂时没有**批量清理测试号和删除单个账号的脚本（这里以前引用的
+`scripts/cleanup_testdata.py`、`scripts/del_user.sh` 并不在仓库里）。
+真要删号，先 `sudo /opt/english-practice/app/scripts/backup.sh` 拍快照，再手工处理：
+账号在 `users` 表，名下的会话、逐题作答、注册记录分别在 `practice_sessions`、`practice_records`、
+`invite_uses`，录音文件在录音目录里以 `u<用户id>_` 开头。
 
 ---
 
@@ -366,11 +403,13 @@ sudo tail /var/log/nginx/english-practice.error.log
 
 ### 6.2 录音上传 413
 
-**症状**：学生提交练习时，长会话的录音上传失败，报 413 Request Entity Too Large。
+**症状**：练习中某一题的录音上传失败，报 413 Request Entity Too Large。
 
-**原因**：nginx 的 `client_max_body_size` 还是默认的 1m，而学生整场练习的录音可能到 10-20MB。
+**原因**：录音是每题一条单独上传的。nginx 的 `client_max_body_size` 还是默认的 1m 时，稍长一点的录音就会被挡；
+如果 nginx 放行了，应用自己还有一道 `MAX_UPLOAD_MB` 上限。两边返回的 413 页面长得不一样，看响应体能分出是谁挡的。
 
 **修复**：编辑 `/etc/nginx/conf.d/english-practice-app.loc`，确保有 `client_max_body_size 20m;`，然后 `sudo nginx -t && sudo systemctl reload nginx`。
+要放宽就和 env 里的 `MAX_UPLOAD_MB` 一起改。
 
 ### 6.3 手机录不了音
 
@@ -406,16 +445,10 @@ sudo tail /var/log/nginx/english-practice.error.log
 
 **原因**：数据库表结构缺列（老代码升级后没跑迁移）。
 
-**修复**：
+**修复**：重跑一遍不带参数的 `init_db.py`，它会补齐缺的表和列（见 5.1）：
 ```bash
-sudo -u englishapp /opt/english-practice/venv/bin/python -c "
-from scripts.init_db import migrate_users_rhythm_columns, migrate_words_voice_columns
-import sqlite3
-conn = sqlite3.connect('data/app.db')
-migrate_users_rhythm_columns(conn)
-migrate_words_voice_columns(conn)
-conn.commit()
-"
+sudo /opt/english-practice/app/scripts/backup.sh
+ep scripts/init_db.py
 sudo systemctl restart english-practice.service
 ```
 
@@ -435,22 +468,42 @@ sudo systemctl restart english-practice.service
 
 如果要防刷接口（比如暴力尝试邀请码），可以在 nginx 里加限速：
 
-```nginx
-# /etc/nginx/conf.d/english-practice.conf 的 http 块里
-limit_req_zone $binary_remote_addr zone=register:10m rate=1r/s;
+部署模板里**没有**这段配置，需要时自己加。两处要改：
 
-# location /register 里
-limit_req zone=register burst=5 nodelay;
+```nginx
+# 1) /etc/nginx/conf.d/english-practice.conf 的最上面、所有 server 块之外。
+#    conf.d/*.conf 是在 http 层被 include 的，所以写在这里就是 http 层。
+limit_req_zone $binary_remote_addr zone=register:10m rate=1r/s;
 ```
+
+```nginx
+# 2) /etc/nginx/conf.d/english-practice-app.loc 里，location / 之前。
+#    精确匹配的 location 不会继承 location / 里的 proxy_* 设置，要整段重复一遍。
+location = /register {
+    limit_req zone=register burst=5 nodelay;
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection       "";
+    proxy_set_header Host             $host;
+    proxy_set_header X-Real-IP        $remote_addr;
+    proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+改完 `sudo nginx -t && sudo systemctl reload nginx`。
 
 ### 7.4 定期备份
 
 ```bash
-# 每天凌晨 3 点备份数据库和录音
+# 每天凌晨 3 点备份数据库和录音（脚本说明见 5.2）
 echo "0 3 * * * root /opt/english-practice/app/scripts/backup.sh" | sudo tee /etc/cron.d/english-practice-backup
+
+# 装好后先手动跑一次，确认真的产出了文件
+sudo /opt/english-practice/app/scripts/backup.sh && sudo ls -l /var/backups/english-practice
 ```
 
-`backup.sh` 内容参考 5.2 节。
+脚本失败时 cron 会把输出发到 root 的本地邮箱；机器上没配邮件的话，隔段时间看一眼备份目录里的日期。
 
 ---
 
