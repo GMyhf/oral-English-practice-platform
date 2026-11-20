@@ -27,7 +27,7 @@ python -m unittest tests.test_app_modes.TestLocalMode -v                       #
 python -m unittest tests.test_app_modes.TestLocalMode.test_pages_open_without_any_session -v  # 单个用例
 ```
 
-测试需要先有 `data/app.db`（没有就整体 SkipTest）。它把库复制到临时目录，改 `db.DB_PATH` 指向副本，
+`tests/test_app_modes.py` 需要先有 `data/app.db`（没有就整体 SkipTest）；`tests/test_accounts_and_invites.py` 自己用 `init_db.SCHEMA` 在临时目录建空库，不依赖开发库，新测试优先照它的 `FreshDbTestCase` 写。它把库复制到临时目录，改 `db.DB_PATH` 指向副本，
 所以不会写开发库。切模式靠直接赋值 `config.APP_MODE`，测解析时用 `importlib.reload(config)`。
 测试只覆盖后端；IndexedDB 那一半要在真浏览器里按 `docs/deployment.md` 第 8.2 节手工验。
 
