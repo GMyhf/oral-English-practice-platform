@@ -26,6 +26,7 @@ const Common = (() => {
     if (!res.ok) {
       const err = new Error(json.error || `请求失败（${res.status}）`);
       err.status = res.status;
+      err.data = json;          // 409 之类的拒绝会附带可用信息（如交卷接口的 result_url）
       throw err;
     }
     return json;

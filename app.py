@@ -733,6 +733,18 @@ def api_create_session():
     return jsonify({"session_id": cur.lastrowid})
 
 
+def already_finished(session_id):
+    """已交卷的会话再提交：409，同时给出结果页地址。
+
+    最常见的来源不是作弊，而是「服务器已经存好、响应在路上丢了」后前端重试，
+    所以带上 result_url，前端据此直接跳去结果页，而不是报错。
+    """
+    return jsonify({
+        "error": "这场练习已经交过卷了，成绩不能再改",
+        "result_url": url_for("result_page", session_id=session_id),
+    }), 409
+
+
 @app.post("/api/practice/finish")
 @api_login_required
 def api_finish_session():
@@ -751,11 +763,13 @@ def api_finish_session():
 
     db = get_db()
     row = db.execute(
-        "SELECT id FROM practice_sessions WHERE id = ? AND user_id = ?",
+        "SELECT id, finished FROM practice_sessions WHERE id = ? AND user_id = ?",
         (session_id, uid),
     ).fetchone()
     if not row:
         return jsonify({"error": "练习会话不存在"}), 404
+    if row["finished"]:
+        return already_finished(session_id)
 
     # 先把所有记录校验完再动数据库：边校验边写会让一条脏数据把已有成绩删掉后 500
     parsed = []
@@ -790,6 +804,18 @@ def api_finish_session():
             own_recording_path(rec.get("recording_path"), uid),
         ))
 
+    # 交卷只能交一次：以前对已交卷的会话再提交一遍，会把整场成绩删掉重写，
+    # 等于开着一个「交完再改」的口子。上面那次读只是为了早点给出友好提示，
+    # 真正的闸门是这条带条件的 UPDATE —— 它在同一个事务里拿到写锁，
+    # 两个并发的交卷请求只会有一个改到这一行，另一个拿到 rowcount 0 后回滚。
+    claimed = db.execute(
+        "UPDATE practice_sessions SET finished = 1 WHERE id = ? AND finished = 0",
+        (session_id,),
+    ).rowcount
+    if not claimed:
+        db.rollback()
+        return already_finished(session_id)
+
     db.execute("DELETE FROM practice_records WHERE session_id = ?", (session_id,))
     correct = 0
     for seq, payload_json, answer, is_correct, recording in parsed:
@@ -801,8 +827,8 @@ def api_finish_session():
         )
     total = len(parsed)
     db.execute(
-        "UPDATE practice_sessions SET total = ?, correct_count = ?, wrong_count = ?, "
-        "finished = 1 WHERE id = ?",
+        "UPDATE practice_sessions SET total = ?, correct_count = ?, wrong_count = ? "
+        "WHERE id = ?",
         (total, correct, total - correct, session_id),
     )
     db.commit()

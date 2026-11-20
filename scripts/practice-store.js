@@ -71,8 +71,17 @@ const PracticeStore = (() => {
       });
       return { resultUrl: `/result/${sessionId}`, local: true };
     }
-    const res = await Common.api("/api/practice/finish", { session_id: sessionId, records });
-    return { resultUrl: res.result_url, local: false };
+    try {
+      const res = await Common.api("/api/practice/finish", { session_id: sessionId, records });
+      return { resultUrl: res.result_url, local: false };
+    } catch (err) {
+      // 409 = 这场已经交过卷。多半是上一次其实存好了、只是响应丢了，
+      // 成绩以服务器上那份为准，直接去结果页，不当成失败。
+      if (err.status === 409 && err.data && err.data.result_url) {
+        return { resultUrl: err.data.result_url, local: false };
+      }
+      throw err;
+    }
   }
 
   return { createSession, saveRecording, finish, get local() { return AppMode.local; } };
