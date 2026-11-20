@@ -2,14 +2,17 @@
 """建表 + 灌入种子数据。
 
 用法（在项目根目录）：
-    python scripts/init_db.py            # 幂等，重复执行不会重复插入
-    python scripts/init_db.py --reset    # 先删掉已有表再重建
+    python scripts/init_db.py                  # 幂等，重复执行不会重复插入
+    python scripts/init_db.py --reset          # 先备份，再删掉已有表重建（要输入 RESET 确认）
+    python scripts/init_db.py --reset --yes    # 非交互环境（脚本、CI）里跳过确认，备份照做
 """
+import argparse
 import json
 import os
 import re
 import sqlite3
 import sys
+import time
 
 # Windows 控制台默认 GBK，打印音标（/iː/ 之类）会抛 UnicodeEncodeError
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,7 +24,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from db import connect as connect_db, resolve_db_path  # noqa: E402
+from db import connect as connect_db, resolve_db_path, resolve_recording_dir  # noqa: E402
 from services import registration  # noqa: E402  只为拿那两张邀请码表的 DDL，见下面 SCHEMA
 
 # 库路径和 pragma 都从 db.py 拿，不要再在这里写死第二份 ——
@@ -804,6 +807,50 @@ def migrate_users_rhythm_columns(conn):
             print("已为 users 表补上 %s 列" % name)
 
 
+def backup_before_reset(conn):
+    """--reset 之前把库和录音目录都留一份，返回 (库备份路径, 录音挪到的路径)，没有的项为 None。
+
+    库用 SQLite 的 backup API 拷：WAL 模式下直接复制 app.db 会漏掉 -wal 里还没合并的事务。
+    录音目录整体改名而不是删除：一是和库备份成对，真要回滚两样都在；二是 reset 后
+    sqlite_sequence 清零、用户 id 从 1 重新编号，而录音的归属看的是文件名里的 u<id>_，
+    旧文件留在原处，新的 1 号用户就会在校验上「拥有」旧 1 号用户的录音。
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    db_backup = None
+    has_tables = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+    if has_tables:
+        db_backup = "%s.bak-%s" % (DB_PATH, stamp)   # .gitignore 已忽略 data/*.db.bak-*
+        dest = sqlite3.connect(db_backup)
+        try:
+            conn.backup(dest)
+        finally:
+            dest.close()
+
+    rec_dir = resolve_recording_dir()
+    rec_moved = None
+    if os.path.isdir(rec_dir) and os.listdir(rec_dir):
+        rec_moved = "%s.bak-%s" % (rec_dir.rstrip("/\\"), stamp)
+        os.rename(rec_dir, rec_moved)
+    return db_backup, rec_moved
+
+
+def confirm_reset(assume_yes):
+    """--reset 会删掉全部账号、成绩和邀请码，必须明确确认。"""
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print("--reset 需要确认，但当前不是交互终端；确实要清空请加 --yes。", file=sys.stderr)
+        return False
+    print("即将清空 %s 里的全部账号、练习记录和邀请码（会先自动备份）。" % DB_PATH)
+    print("如果服务正在运行，请先停掉它。")
+    try:
+        answer = input("确认请输入 RESET：")
+    except EOFError:
+        return False
+    return answer.strip() == "RESET"
+
+
 def init_db(reset=False):
     # 建库这一步也要 WAL：journal_mode 是写进库文件头的永久设置，
     # 在这里落一次，运行时（db.connect）只是每个连接再确认一遍。
@@ -811,6 +858,11 @@ def init_db(reset=False):
     conn.row_factory = sqlite3.Row
 
     if reset:
+        db_backup, rec_moved = backup_before_reset(conn)
+        if db_backup:
+            print("--reset：旧库已备份到 %s" % db_backup)
+        if rec_moved:
+            print("--reset：旧录音已挪到 %s" % rec_moved)
         print("--reset：删除旧表")
         conn.executescript(DROP)
 
@@ -873,5 +925,20 @@ def init_db(reset=False):
     conn.close()
 
 
+def parse_args(argv=None):
+    # 以前是 "--reset" in sys.argv：--help 会把整个初始化跑一遍，--rest 这种拼错会被静默忽略。
+    parser = argparse.ArgumentParser(description="建表、灌种子数据、扫描 static/audio 登记音频。不带参数时幂等。")
+    parser.add_argument("--reset", action="store_true",
+                        help="先备份库和录音目录，再删掉全部表重建（会清空账号、成绩、邀请码）")
+    parser.add_argument("--yes", action="store_true",
+                        help="配合 --reset，跳过交互确认（备份照做）")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    init_db(reset="--reset" in sys.argv)
+    args = parse_args()
+    if args.yes and not args.reset:
+        sys.exit("--yes 只能和 --reset 一起用")
+    if args.reset and not confirm_reset(args.yes):
+        sys.exit("已取消，什么都没改。")
+    init_db(reset=args.reset)

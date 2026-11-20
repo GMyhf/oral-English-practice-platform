@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 pip install -r requirements.txt           # 只依赖 Flask，没有构建、没有 lint 配置
 python scripts/init_db.py                 # 建表 + 种子词 + 扫描 static/audio；可重复执行
-python scripts/init_db.py --reset         # 清空重来：会删掉所有账号和练习记录
+python scripts/init_db.py --reset         # 清空重来：要输入 RESET 确认，先备份库与录音目录再删表
 python app.py                             # http://127.0.0.1:5000，FLASK_DEBUG=true 开调试
 python scripts/serve_https.py             # 自签 HTTPS 起服务，手机录音必须走 https 或 localhost
 

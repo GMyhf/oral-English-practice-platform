@@ -20,6 +20,18 @@ def resolve_db_path():
     return os.path.normpath(os.path.join(BASE_DIR, path))
 
 
+def resolve_recording_dir():
+    """把 config.RECORDING_DIR 解析成绝对路径，规则同 resolve_db_path。
+
+    放在这里而不是 app.py：init_db.py --reset 也要知道录音在哪儿，
+    而脚本不该为了一个路径去 import 整个 Flask 应用。
+    """
+    raw = (config.RECORDING_DIR or "data/recordings").replace("\\", "/")
+    if os.path.isabs(raw):
+        return os.path.normpath(raw)
+    return os.path.normpath(os.path.join(BASE_DIR, raw))
+
+
 # 模块级常量留着：脚本和测试都从这里取路径，也是「只有一个真来源」的意思
 DB_PATH = resolve_db_path()
 
